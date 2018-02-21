@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/b71729/dcm/core"
+	"github.com/b71729/opendcm/core"
 )
 
 func check(e error) {
@@ -96,14 +96,18 @@ func main() {
 	outF, err := os.Create("../../core/dicomdict.go")
 	check(err)
 	outCode := `package core
-// GENERATED FILE. RUNNING util:gendatadict.go WILL OVERWRITE CHANGES.
+// Code generated using util:gendatadict. DO NOT EDIT.
 
+// DicomDictionary provides a mapping between uint32 representation of a DICOM Tag and a DictEntry pointer.
 var DicomDictionary = map[uint32]*DictEntry{
 	0x00020000: &DictEntry{Tag: 0x00020000, Name: "FileMetaInformationGroupLength", NameHuman: "File Meta Information Group Length", VR: "UL", Retired: false},
     0x00020001: &DictEntry{Tag: 0x00020001, Name: "FileMetaInformationVersion", NameHuman: "File Meta Information Version", VR: "OB", Retired: false},
     0x00020002: &DictEntry{Tag: 0x00020002, Name: "MediaStorageSOPClassUID", NameHuman: "Media Storage SOP Class UID", VR: "UI", Retired: false},
     0x00020003: &DictEntry{Tag: 0x00020003, Name: "MediaStorageSOPInstanceUID", NameHuman: "Media Storage SOP Instance UID", VR: "UI", Retired: false},
 	0x00020010: &DictEntry{Tag: 0x00020010, Name: "TransferSyntaxUID", NameHuman: "Transfer Syntax UID", VR: "UI", Retired: false},
+	0x00020012: &DictEntry{Tag: 0x00020012, Name: "ImplementationClassUID", NameHuman: "Implementation Class UID", VR: "UI", Retired: false},
+	0x00020013: &DictEntry{Tag: 0x00020013, Name: "ImplementationVersionName", NameHuman: "Implementation Version Name", VR: "SH", Retired: false},
+	0x00020016: &DictEntry{Tag: 0x00020016, Name: "SourceApplicationEntityTitle", NameHuman: "Source Application Entity Title", VR: "AE", Retired: false},
 
 `
 	for _, v := range x {

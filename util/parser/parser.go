@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/b71729/dcm/core"
+	"github.com/b71729/opendcm/core"
 )
 
 func check(e error) {

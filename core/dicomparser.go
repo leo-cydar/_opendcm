@@ -71,10 +71,10 @@ func ParseDicom(path string) (DicomFile, error) {
 		return dcm, errors.New("Not a dicom file")
 	}
 
-	//reader := bufio.NewReader(f)
 	bufferSize := int64(1024)
-	if stat.Size() < 1024 {
-		bufferSize = stat.Size()
+	fileSize := stat.Size()
+	if fileSize < 1024 {
+		bufferSize = fileSize
 	}
 	buffer := make([]byte, bufferSize)
 	f.Read(buffer)
@@ -84,17 +84,20 @@ func ParseDicom(path string) (DicomFile, error) {
 	if string(dicmTestString) != "DICM" {
 		return dcm, errors.New("Not a dicom file")
 	}
-	// 132
+
+	position, _ := r.Seek(0, os.SEEK_CUR)
+
 	metaLengthElement, err := ReadElement(r)
-	totalBytesMeta := int64(132 + int(metaLengthElement.Value().(uint32)))
+	log.Printf("[%s] %s = %v", metaLengthElement.VR, metaLengthElement.Name, metaLengthElement.Value())
+	totalBytesMeta := position + int64(metaLengthElement.Value().(uint32))
 	for {
-		position, _ := r.Seek(0, os.SEEK_CUR)
-		if position > totalBytesMeta {
-			break
-		}
 		element, err := ReadElement(r)
 		check(err)
 		log.Printf("[%s] %s = %v", element.VR, element.Name, element.Value())
+		position, _ = r.Seek(0, os.SEEK_CUR)
+		if position >= totalBytesMeta {
+			break
+		}
 	}
 
 	return dcm, nil
