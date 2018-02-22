@@ -15,105 +15,68 @@ func check(e error) {
 	}
 }
 
-func ReadElement(r *bytes.Reader) (Element, error) {
-	element := Element{}
-	buf, err := readBytes(r, 4)
-	if err != nil {
-		return element, err
-	}
-	lower := binary.LittleEndian.Uint16(buf[:2])
-	upper := binary.LittleEndian.Uint16(buf[2:])
-	tagUint32 := (uint32(lower) << 16) | uint32(upper)
-	tag, _ := LookupTag(tagUint32)
-	element.DictEntry = tag
-
-	if element.VR == "UN" /* && explicit VR */ {
-		VRbytes, err := readBytes(r, 2)
-		if err != nil {
-			return element, err
-		}
-		element.VR = string(VRbytes)
-	} else {
-		// if explicit VR only, skip two bytes:
-		// TODO: Check Transfer syntax
-		err := skipBytes(r, 2)
-		if err != nil {
-			return element, err
-		}
-	}
-	if element.VR == "OB" || element.VR == "OW" || element.VR == "SQ" || element.VR == "UN" || element.VR == "UT" {
-		err := skipBytes(r, 2)
-		if err != nil {
-			return element, err
-		}
-		element.ValueLength, err = readUint32(r)
-		if err != nil {
-			return element, err
-		}
-	} else {
-		length, err := readUint16(r)
-		if err != nil {
-			return element, err
-		}
-		element.ValueLength = uint32(length)
-	}
-	valuebuf, err := readBytes(r, int(element.ValueLength))
-	if err != nil {
-		return element, err
-	}
-	element.value = bytes.NewBuffer(valuebuf)
-	return element, nil
+type TransferSyntax struct {
+	UIDEntry *UIDEntry
+	Encoding *Encoding
 }
 
-func skipBytes(r *bytes.Reader, num int64) error {
-	nseek, err := r.Seek(num, os.SEEK_CUR)
-	if nseek < num || err != nil {
-		return io.EOF
+func (ts TransferSyntax) SetFromUID(uidstr string) error {
+	log.Printf("SetFromUID: %s", uidstr)
+	uidptr, err := LookupUID(uidstr)
+	if err != nil {
+		return err
 	}
+	ts.UIDEntry = uidptr
+	ts.Encoding = GetEncodingForTransferSyntax(ts)
+	log.Printf("Switched to Reader Transfer Syntax UID: %v", uidptr)
 	return nil
 }
 
-func getPosition(r *bytes.Reader) int64 {
-	pos, _ := r.Seek(0, io.SeekCurrent)
-	return pos
+// Encoding represents the expected encoding of dicom attributes. See TransferSyntaxToEncodingMap.
+type Encoding struct {
+	ImplicitVR   bool
+	LittleEndian bool
 }
 
-func readUint16(r *bytes.Reader) (uint16, error) {
-	buf := make([]byte, 2)
-	nread, err := r.Read(buf)
-	if nread != 2 || err != nil {
-		return 0, io.EOF
+// TransferSyntaxToEncodingMap provides a mapping between transfer syntax UID and encoding
+// I couldn't find this mapping in the NEMA documents.
+var TransferSyntaxToEncodingMap = map[string]*Encoding{
+	"1.2.840.10008.1.2":      &Encoding{ImplicitVR: true, LittleEndian: true},
+	"1.2.840.10008.1.2.1":    &Encoding{ImplicitVR: false, LittleEndian: true},
+	"1.2.840.10008.1.2.1.99": &Encoding{ImplicitVR: false, LittleEndian: true},
+	"1.2.840.10008.1.2.2":    &Encoding{ImplicitVR: false, LittleEndian: false},
+}
+
+// GetEncodingForTransferSyntax returns the encoding for a given TransferSyntax, or defaults.
+func GetEncodingForTransferSyntax(ts TransferSyntax) *Encoding {
+	if ts.UIDEntry != nil {
+		encoding, ok := TransferSyntaxToEncodingMap[ts.UIDEntry.UID]
+		if ok {
+			return encoding
+		}
 	}
-	return binary.LittleEndian.Uint16(buf), nil
+	return TransferSyntaxToEncodingMap["1.2.840.10008.1.2"] // fallback (default)
 }
 
-func readUint32(r *bytes.Reader) (uint32, error) {
-	buf := make([]byte, 4)
-	nread, err := r.Read(buf)
-	if nread != 4 || err != nil {
-		return 0, io.EOF
-	}
-	return binary.LittleEndian.Uint32(buf), nil
+// DicomFileReader provides an abstraction layer around a `byees.Reader` to facilitate easier parsing.
+type DicomFileReader struct {
+	_reader        *bytes.Reader
+	Position       int64
+	TransferSyntax TransferSyntax
 }
 
-func readBytes(r *bytes.Reader, num int) ([]byte, error) {
-	buf := make([]byte, num)
-	nread, err := r.Read(buf)
-	if nread != num || err != nil {
-		return buf, io.EOF
-	}
-	return buf, nil
-}
-
-func ParseDicom(path string) (DicomFile, error) {
-	dcm := DicomFile{}
+func NewDicomFileReader(path string) (DicomFileReader, error) {
+	reader := DicomFileReader{Position: 0, TransferSyntax: TransferSyntax{}}
+	uid, _ := LookupUID("1.2.840.10008.1.2.1")
+	reader.TransferSyntax.UIDEntry = uid
+	reader.TransferSyntax.Encoding = GetEncodingForTransferSyntax(reader.TransferSyntax)
 	f, err := os.Open(path)
 	check(err)
 	defer f.Close()
 	stat, err := f.Stat()
 	check(err)
 	if stat.Size() < int64(132) {
-		return dcm, errors.New("Not a dicom file")
+		return reader, errors.New("Not a dicom file")
 	}
 
 	bufferSize := int64(1024)
@@ -124,34 +87,224 @@ func ParseDicom(path string) (DicomFile, error) {
 	buffer := make([]byte, bufferSize)
 	f.Read(buffer)
 	r := bytes.NewReader(buffer)
-	preamble, err := readBytes(r, 128)
+	reader._reader = r
+	return reader, nil
+}
+
+// ReadElement yields an `Element` from the active buffer, and an `error` if something went wrong.
+func (dr DicomFileReader) ReadElement() (Element, error) {
+	element := Element{}
+	lower, err := dr.readUint16()
 	if err != nil {
-		return dcm, err
+		return element, err
 	}
-	copy(dcm.Meta.Preamble[:], preamble)
-	dicmTestString, err := readBytes(r, 4)
+	upper, err := dr.readUint16()
 	if err != nil {
-		return dcm, err
+		return element, err
+	}
+	tagUint32 := (uint32(lower) << 16) | uint32(upper)
+	tag, _ := LookupTag(tagUint32)
+	element.DictEntry = tag
+	if !dr.TransferSyntax.Encoding.ImplicitVR { // if explicit, read VR from buffer
+		if element.VR == "UN" { // but only if we dont already have VR from dictionary (more reliable)
+			VRbytes, err := dr.readBytes(2)
+			if err != nil {
+				return element, err
+			}
+			element.VR = string(VRbytes)
+		} else { // else just skip two bytes as we are using dictionary value
+			err := dr.skipBytes(2)
+			if err != nil {
+				return element, err
+			}
+		}
+		if element.VR == "OB" || element.VR == "OW" || element.VR == "SQ" || element.VR == "UN" || element.VR == "UT" {
+			// these VRs, in explicit VR mode, have two reserved bytes following VR definition
+			err := dr.skipBytes(2)
+			if err != nil {
+				return element, err
+			}
+			element.ValueLength, err = dr.readUint32()
+			if err != nil {
+				return element, err
+			}
+		} else {
+			length, err := dr.readUint16()
+			if err != nil {
+				return element, err
+			}
+			element.ValueLength = uint32(length)
+		}
+	} else {
+		// implicit VR -- all VR length definitions are 32 bits
+		element.ValueLength, err = dr.readUint32()
+		if err != nil {
+			return element, err
+		}
+	}
+	valuebuf := make([]byte, element.ValueLength)
+	// TODO: string padding -- should remove trailing 0x00 / 0x20 bytes (see: http://dicom.nema.org/dicom/2013/output/chtml/part05/sect_6.2.html)
+	err = dr.read(valuebuf)
+	if err != nil {
+		return element, err
+	}
+	padchar := byte(0xFF)
+	switch element.VR {
+	case "UI", "OB":
+		padchar = 0x00
+	case "AE", "AS", "CS", "DA", "DS", "DT", "IS", "LO", "LT", "OD", "OF", "OW", "PN", "SH", "ST", "TM", "UT":
+		padchar = 0x20
+	}
+	if padchar != 0xFF && valuebuf[len(valuebuf)-1] == padchar {
+		valuebuf = valuebuf[:len(valuebuf)-2]
+	}
+	element.value = bytes.NewBuffer(valuebuf)
+
+	return element, nil
+}
+
+func (dr DicomFileReader) skipBytes(num int64) error {
+	nseek, err := dr._reader.Seek(num, os.SEEK_CUR)
+	if nseek < num || err != nil {
+		return io.EOF
+	}
+	return nil
+}
+
+func (dr DicomFileReader) getPosition() int64 {
+	pos, _ := dr._reader.Seek(0, io.SeekCurrent)
+	return pos
+}
+
+func (dr DicomFileReader) read(v interface{}) error {
+	if dr.TransferSyntax.Encoding.LittleEndian {
+		return binary.Read(dr._reader, binary.LittleEndian, v)
+	}
+	return binary.Read(dr._reader, binary.BigEndian, v)
+}
+
+func (dr DicomFileReader) readUint16() (uint16, error) {
+	buf := make([]byte, 2)
+	nread, err := dr._reader.Read(buf)
+	if nread != 2 || err != nil {
+		return 0, io.EOF
+	}
+	if dr.TransferSyntax.Encoding.LittleEndian {
+		return binary.LittleEndian.Uint16(buf), nil
+	}
+	return binary.BigEndian.Uint16(buf), nil
+}
+
+func (dr DicomFileReader) readUint32() (uint32, error) {
+	buf := make([]byte, 4)
+	nread, err := dr._reader.Read(buf)
+	if nread != 4 || err != nil {
+		return 0, io.EOF
+	}
+	if dr.TransferSyntax.Encoding.LittleEndian {
+		return binary.LittleEndian.Uint32(buf), nil
+	}
+	return binary.BigEndian.Uint32(buf), nil
+}
+
+func (fb DicomFileReader) readBytes(num int) ([]byte, error) {
+	buf := make([]byte, num)
+	nread, err := fb._reader.Read(buf)
+	if nread != num || err != nil {
+		return buf, io.EOF
+	}
+	return buf, nil
+}
+
+func (df DicomFile) CrawlMeta() error {
+	df.Reader._reader.Seek(0, io.SeekStart)
+
+	preamble, err := df.Reader.readBytes(128)
+	if err != nil {
+		return err
+	}
+	copy(df.Meta.Preamble[:], preamble)
+	dicmTestString, err := df.Reader.readBytes(4)
+	if err != nil {
+		return err
 	}
 	if string(dicmTestString) != "DICM" {
-		return dcm, errors.New("Not a dicom file")
+		return errors.New("Not a dicom file")
 	}
 
-	// parse header:
-
-	metaLengthElement, err := ReadElement(r)
+	metaLengthElement, err := df.Reader.ReadElement()
 	check(err)
-	log.Printf("[%s] %s = %v", metaLengthElement.VR, metaLengthElement.Name, metaLengthElement.Value())
-	totalBytesMeta := getPosition(r) + int64(metaLengthElement.Value().(uint32))
+	totalBytesMeta := df.Reader.getPosition() + int64(metaLengthElement.Value().(uint32))
 	for {
-		element, err := ReadElement(r)
+		element, err := df.Reader.ReadElement()
 		if err != nil {
-			return dcm, err
+			if err == io.EOF {
+				break
+			} else {
+				return err
+			}
 		}
-		dcm.Meta.Elements = append(dcm.Meta.Elements, element)
-		if getPosition(r) >= totalBytesMeta {
+		df.Elements[uint32(element.Tag)] = element
+
+		if df.Reader.getPosition() >= totalBytesMeta {
 			break
 		}
+	}
+
+	return nil
+}
+
+func (df DicomFile) CrawlElements() error {
+	// change transfer syntax if necessary
+	transfersyntaxuid, ok := df.GetElement(0x0020010)
+	if ok {
+		s := transfersyntaxuid.Value().(string)
+		df.Reader.TransferSyntax = TransferSyntax{}
+		err := df.Reader.TransferSyntax.SetFromUID(s)
+		if err != nil {
+			return err
+		}
+		log.Printf("Switched to Reader Transfer Syntax UID: %v", df.Reader.TransferSyntax.UIDEntry)
+		log.Printf("Implicit VR: %v, Little Endian: %v", df.Reader.TransferSyntax.Encoding.ImplicitVR, df.Reader.TransferSyntax.Encoding.LittleEndian)
+	}
+
+	// now parse rest of elements:
+	fileStat, _ := os.Stat(df.filepath)
+	fileSize := fileStat.Size()
+	for {
+		element, err := df.Reader.ReadElement()
+		if err != nil {
+			if err == io.EOF {
+				break
+			} else {
+				return err
+			}
+		}
+		df.Elements[uint32(element.Tag)] = element
+
+		if df.Reader.getPosition() >= fileSize {
+			break
+		}
+	}
+
+	return nil
+}
+
+func ParseDicom(path string) (DicomFile, error) {
+	dcm := DicomFile{}
+	dcm.Elements = make(map[uint32]Element)
+	dr, err := NewDicomFileReader(path)
+	if err != nil {
+		return dcm, err
+	}
+	dcm.Reader = dr
+
+	// parse header:
+	if err := dcm.CrawlMeta(); err != nil {
+		return dcm, err
+	}
+	if err = dcm.CrawlElements(); err != nil {
+		return dcm, err
 	}
 
 	return dcm, nil

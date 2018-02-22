@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -18,82 +19,109 @@ func check(e error) {
 	}
 }
 
-func ParseDataElements(buf []byte) []core.DictEntry {
+var stringRE, tagRE, uidStartRE *regexp.Regexp
 
-	decoder := xml.NewDecoder(strings.NewReader(string(buf)))
-	decoder.Strict = false
-	whitespaceRE, err := regexp.Compile("[\\s]+")
-	check(err)
-	tagRE, err := regexp.Compile("\\([\\dA-F]{4}\\,[\\dA-F]{4}\\)")
-	check(err)
-	length := 0
-	var x []core.DictEntry
-	mode := -1
-	index := -1
+func eachToken(data string, cb func(token string)) {
+	decoder := xml.NewDecoder(strings.NewReader(data))
 	for {
 		token, err := decoder.Token()
 		if token == nil {
 			break
 		}
 		check(err)
-		switch element := token.(type) {
-		case xml.CharData:
-			elementString := strings.Replace(string(element), "\u200b", "", -1)
-			allblank := whitespaceRE.Match([]byte(elementString))
-			if !allblank {
-				if tagRE.Match([]byte(element)) {
-					mode = 1
-					index++
-				}
-				switch mode {
-				case 1:
-					x = append(x, core.DictEntry{})
-					tagString := elementString[1:][:9]
-					tagString = strings.Replace(tagString, ",", "", 1)
-					tagInt, err := strconv.ParseUint(tagString, 16, 32)
-					check(err)
-					x[index].Tag = core.Tag(tagInt)
-					x[index].Retired = false
-				case 2:
-					x[index].NameHuman = strings.Replace(fmt.Sprintf("%s", token), "\u200b", " ", -1)
-					x[index].Name = elementString
-				case 3:
-					x[index].VR = elementString
-				case 5:
-					x[index].Retired = true
-				}
-				mode++
+		if token, ok := token.(xml.CharData); ok {
+			val := strings.Replace(string(token), "\u200b", " ", -1)
+			if stringRE.MatchString(val) {
+				cb(val)
 			}
 		}
-		length++
 	}
-	return x
 }
 
-func ParseFileMetaElements(buf []byte) []core.DictEntry {
-	var x []core.DictEntry
-	decoder := xml.NewDecoder(strings.NewReader(string(buf)))
-	decoder.Strict = false
-
-	for {
-		token, err := decoder.Token()
-		if token == nil {
-			break
+// ParseDataElements accepts a string buffer, and returns an array of `DictEntry`
+func ParseDataElements(data string) (elements []core.DictEntry) {
+	index := -1
+	mode := -1
+	eachToken(data, func(token string) {
+		if tagRE.MatchString(token) {
+			mode = 1
+			index++
 		}
-		check(err)
-		switch element := token.(type) {
-		case xml.CharData:
-			elementString := strings.Replace(string(element), "\u200b", "", -1)
-			log.Println(elementString)
+		switch mode {
+		case 1:
+			elements = append(elements, core.DictEntry{})
+			tagString := token[1:][:9]
+			tagString = strings.Replace(tagString, ",", "", 1)
+			tagInt, err := strconv.ParseUint(tagString, 16, 32)
+			check(err)
+			elements[index].Tag = core.Tag(tagInt)
+			elements[index].Retired = false
+		case 2:
+			elements[index].NameHuman = token
+		case 3:
+			elements[index].Name = strings.Replace(token, " ", "", -1)
+		case 4:
+			if len(token) < 2 {
+				token = "UN"
+			}
+			switch token[:2] {
+			case "AE", "AS", "AT", "CS", "DA", "DS", "DT", "FL", "FD", "IS", "LO", "LT", "PN", "SH", "SL", "ST", "SS", "TM", "UI", "UL", "US",
+				"OB", "OD", "OF", "OL", "OW", "SQ", "UC", "UR", "UT", "UN": // Table 7.1-1
+				elements[index].VR = token[:2]
+			default:
+				elements[index].VR = "UN"
+				log.Printf("Note: VR for Data Element %s is '%s'. Using 'UN' instead.", elements[index].Tag, token)
+			}
+		case 6:
+			if token == "RET" {
+				elements[index].Retired = true
+			}
 		}
-	}
-	return x
+		mode++
+	})
+	return elements
 }
 
-/*
-	Generates a DICOM data dictionary file from XML
-*/
+// ParseUIDs accepts a string buffer, and returns an array of `UIDEntry`
+func ParseUIDs(data string) (uids []core.UIDEntry) {
+	index := -1
+	mode := -1
+	eachToken(data, func(token string) {
+		if uidStartRE.Match([]byte(token)) {
+			mode = 1
+			index++
+		}
+		switch mode {
+		case 1:
+			uids = append(uids, core.UIDEntry{})
+			uids[index].UID = strings.Replace(token, " ", "", -1)
+		case 2:
+			uids[index].NameHuman = token
+		case 3:
+			uids[index].Type = token
+		}
+		mode++
+	})
+	return uids
+}
+
+func tableBodyPosition(data string) (posStart int, posEnd int, err error) {
+	posStart = strings.Index(data, "<tbody>")
+	if posStart <= 0 {
+		return 0, 0, errors.New("Could not find <tbody>")
+	}
+	posEnd = strings.Index(data, "</tbody>")
+	if posEnd <= 0 {
+		return posStart, 0, errors.New("Could not find </tbody>")
+	}
+	return posStart, posEnd, nil
+}
+
+// Generates a DICOM data dictionary file from XML
 func main() {
+	if len(os.Args) != 2 {
+		log.Fatalln("Usage: gendatadict XMLFILEPATH")
+	}
 	xmlfile := os.Args[1]
 	f, err := os.Open(xmlfile)
 	check(err)
@@ -103,39 +131,43 @@ func main() {
 	_, err = f.Read(buf)
 	check(err)
 
-	posStart := strings.Index(string(buf), "<tbody>")
-	if posStart <= 0 {
-		panic("Could not find start of data dictionary inside XML")
-	}
-	dataElementsBuffer := buf[posStart+7:]
+	data := string(buf)
+	tagRE, _ = regexp.Compile("\\([0-9A-Fa-f]{4},[0-9A-Fa-f]{4}\\)")
+	uidStartRE, _ = regexp.Compile("([0-9]+\\.[0-9]+\\.[0-9]+)")
+	stringRE, _ = regexp.Compile("([a-zA-Z0-9])")
 
-	posEnd := strings.Index(string(buf), "</tbody>")
-	if posEnd <= 0 {
-		panic("Could not find end of data dictionary inside XML")
-	}
+	// data elements
+	posStart, posEnd, err := tableBodyPosition(data)
+	check(err)
 
-	dataElementsBuffer = dataElementsBuffer[:posEnd-8]
-	x := ParseDataElements(dataElementsBuffer)
-	log.Printf("Found %d items\n", len(x))
+	dataElements := ParseDataElements(data[posStart+7 : posEnd])
+	log.Printf("Found %d data elements\n", len(dataElements))
 
-	fileMetaElementsBuffer := buf[posEnd:]
+	// file meta elements
+	data = data[posEnd+8:]
+	posStart, posEnd, err = tableBodyPosition(data)
+	check(err)
 
-	posFMEStart := strings.Index(string(fileMetaElementsBuffer), "<tbody>")
-	if posFMEStart <= 0 {
-		panic("Could not find start of file meta elements inside XML")
-	}
-	fileMetaElementsBuffer = fileMetaElementsBuffer[posFMEStart+7:]
+	fileMetaElements := ParseDataElements(data[posStart+7 : posEnd])
+	log.Printf("Found %d file meta elements\n", len(fileMetaElements))
 
-	posFMEEnd := strings.Index(string(fileMetaElementsBuffer), "</tbody>")
-	if posFMEEnd <= 0 {
-		panic("Could not find end of file meta elements inside XML")
-	}
+	// directory structure elements
+	data = data[posEnd+8:]
+	posStart, posEnd, err = tableBodyPosition(data)
+	check(err)
 
-	fileMetaElementsBuffer = fileMetaElementsBuffer[:posFMEEnd-8]
+	dirStructElements := ParseDataElements(data[posStart+7 : posEnd])
+	log.Printf("Found %d directory structure elements\n", len(dirStructElements))
 
-	y := ParseDataElements(fileMetaElementsBuffer)
-	log.Printf("Found %d file meta elements\n", len(y))
+	// UIDs
+	data = data[posEnd+8:]
+	posStart, posEnd, err = tableBodyPosition(data)
+	check(err)
 
+	UIDs := ParseUIDs(data[posStart+7 : posEnd])
+	log.Printf("Found %d UIDs elements\n", len(UIDs))
+
+	// build golang string
 	outF, err := os.Create("../../core/datadict.go")
 	check(err)
 	outCode := `// Code generated using util:gendatadict. DO NOT EDIT.
@@ -145,14 +177,33 @@ package core
 // DicomDictionary provides a mapping between uint32 representation of a DICOM Tag and a DictEntry pointer.
 var DicomDictionary = map[uint32]*DictEntry{
 `
-	for _, v := range y {
+	outCode += "    // File Meta Elements\n"
+	for _, v := range fileMetaElements {
 		outCode += fmt.Sprintf(`    0x%08X: &DictEntry{Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", Retired: %v},`, uint32(v.Tag), uint32(v.Tag), v.Name, v.NameHuman, v.VR, v.Retired) + "\n"
 	}
-	for _, v := range x {
+
+	outCode += "    // Directory Structure Elements\n"
+	for _, v := range dirStructElements {
 		outCode += fmt.Sprintf(`    0x%08X: &DictEntry{Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", Retired: %v},`, uint32(v.Tag), uint32(v.Tag), v.Name, v.NameHuman, v.VR, v.Retired) + "\n"
 	}
+
+	outCode += "    // Data Elements\n"
+	for _, v := range dataElements {
+		outCode += fmt.Sprintf(`    0x%08X: &DictEntry{Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", Retired: %v},`, uint32(v.Tag), uint32(v.Tag), v.Name, v.NameHuman, v.VR, v.Retired) + "\n"
+	}
+
+	outCode += `}
+
+// UIDs
+var UIDDictionary = map[string]*UIDEntry{
+`
+	for _, v := range UIDs {
+		outCode += fmt.Sprintf(`    "%s": &UIDEntry{UID: "%s", Type: "%s", NameHuman: "%s"},`, v.UID, v.UID, v.Type, v.NameHuman) + "\n"
+	}
+
 	outCode += `}
 `
+	// write to disk
 	_, err = outF.WriteString(outCode)
 	check(err)
 	log.Printf("Wrote file OK.")

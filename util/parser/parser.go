@@ -15,7 +15,7 @@ func check(e error) {
 
 func main() {
 	dcm, err := core.ParseDicom(os.Args[1])
-	for _, element := range dcm.Meta.Elements {
+	for _, element := range dcm.Elements {
 		log.Printf("[%s] %s = %v", element.VR, element.Name, element.Value())
 	}
 	//check(err)

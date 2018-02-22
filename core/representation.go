@@ -3,17 +3,24 @@ package core
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 )
 
 type DicomFileMeta struct {
 	Preamble [128]byte
-	Elements []Element
 }
 
 type DicomFile struct {
 	filepath string
+	Reader   DicomFileReader
 	Meta     DicomFileMeta
+	Elements map[uint32]Element
+}
+
+func (df DicomFile) GetElement(tag uint32) (Element, bool) {
+	e, ok := df.Elements[tag]
+	return e, ok
 }
 
 type Element struct {
@@ -32,6 +39,12 @@ type DictEntry struct {
 	Retired   bool
 }
 
+type UIDEntry struct {
+	UID       string
+	Type      string
+	NameHuman string
+}
+
 func (t Tag) String() string {
 	upper := uint32(t) >> 16
 	lower := uint32(t) & 0xff
@@ -46,6 +59,14 @@ func LookupTag(t uint32) (*DictEntry, bool) {
 		return &DictEntry{Tag: tag, Name: name, NameHuman: name, VR: "UN", Retired: false}, false
 	}
 	return val, ok
+}
+
+func LookupUID(uid string) (*UIDEntry, error) {
+	val, ok := UIDDictionary[uid]
+	if !ok {
+		return &UIDEntry{}, errors.New("could not find UID")
+	}
+	return val, nil
 }
 
 func (e Element) Value() interface{} {
