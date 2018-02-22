@@ -18,31 +18,7 @@ func check(e error) {
 	}
 }
 
-/*
-	Generates a DICOM data dictionary file from XML
-*/
-func main() {
-	xmlfile := os.Args[1]
-	f, err := os.Open(xmlfile)
-	check(err)
-	stat, err := f.Stat()
-	check(err)
-	buf := make([]byte, stat.Size())
-	_, err = f.Read(buf)
-	check(err)
-
-	posStart := strings.Index(string(buf), "<tbody>")
-	if posStart <= 0 {
-		panic("Could not find start of data dictionary inside XML")
-	}
-	buf = buf[posStart+7:]
-
-	posEnd := strings.Index(string(buf), "</tbody>")
-	if posEnd <= 0 {
-		panic("Could not find end of data dictionary inside XML")
-	}
-
-	buf = buf[:posEnd-8]
+func ParseDataElements(buf []byte) []core.DictEntry {
 
 	decoder := xml.NewDecoder(strings.NewReader(string(buf)))
 	decoder.Strict = false
@@ -91,25 +67,87 @@ func main() {
 		}
 		length++
 	}
+	return x
+}
+
+func ParseFileMetaElements(buf []byte) []core.DictEntry {
+	var x []core.DictEntry
+	decoder := xml.NewDecoder(strings.NewReader(string(buf)))
+	decoder.Strict = false
+
+	for {
+		token, err := decoder.Token()
+		if token == nil {
+			break
+		}
+		check(err)
+		switch element := token.(type) {
+		case xml.CharData:
+			elementString := strings.Replace(string(element), "\u200b", "", -1)
+			log.Println(elementString)
+		}
+	}
+	return x
+}
+
+/*
+	Generates a DICOM data dictionary file from XML
+*/
+func main() {
+	xmlfile := os.Args[1]
+	f, err := os.Open(xmlfile)
+	check(err)
+	stat, err := f.Stat()
+	check(err)
+	buf := make([]byte, stat.Size())
+	_, err = f.Read(buf)
+	check(err)
+
+	posStart := strings.Index(string(buf), "<tbody>")
+	if posStart <= 0 {
+		panic("Could not find start of data dictionary inside XML")
+	}
+	dataElementsBuffer := buf[posStart+7:]
+
+	posEnd := strings.Index(string(buf), "</tbody>")
+	if posEnd <= 0 {
+		panic("Could not find end of data dictionary inside XML")
+	}
+
+	dataElementsBuffer = dataElementsBuffer[:posEnd-8]
+	x := ParseDataElements(dataElementsBuffer)
 	log.Printf("Found %d items\n", len(x))
 
-	outF, err := os.Create("../../core/dicomdict.go")
+	fileMetaElementsBuffer := buf[posEnd:]
+
+	posFMEStart := strings.Index(string(fileMetaElementsBuffer), "<tbody>")
+	if posFMEStart <= 0 {
+		panic("Could not find start of file meta elements inside XML")
+	}
+	fileMetaElementsBuffer = fileMetaElementsBuffer[posFMEStart+7:]
+
+	posFMEEnd := strings.Index(string(fileMetaElementsBuffer), "</tbody>")
+	if posFMEEnd <= 0 {
+		panic("Could not find end of file meta elements inside XML")
+	}
+
+	fileMetaElementsBuffer = fileMetaElementsBuffer[:posFMEEnd-8]
+
+	y := ParseDataElements(fileMetaElementsBuffer)
+	log.Printf("Found %d file meta elements\n", len(y))
+
+	outF, err := os.Create("../../core/datadict.go")
 	check(err)
-	outCode := `package core
-// Code generated using util:gendatadict. DO NOT EDIT.
+	outCode := `// Code generated using util:gendatadict. DO NOT EDIT.
+
+package core
 
 // DicomDictionary provides a mapping between uint32 representation of a DICOM Tag and a DictEntry pointer.
 var DicomDictionary = map[uint32]*DictEntry{
-	0x00020000: &DictEntry{Tag: 0x00020000, Name: "FileMetaInformationGroupLength", NameHuman: "File Meta Information Group Length", VR: "UL", Retired: false},
-    0x00020001: &DictEntry{Tag: 0x00020001, Name: "FileMetaInformationVersion", NameHuman: "File Meta Information Version", VR: "OB", Retired: false},
-    0x00020002: &DictEntry{Tag: 0x00020002, Name: "MediaStorageSOPClassUID", NameHuman: "Media Storage SOP Class UID", VR: "UI", Retired: false},
-    0x00020003: &DictEntry{Tag: 0x00020003, Name: "MediaStorageSOPInstanceUID", NameHuman: "Media Storage SOP Instance UID", VR: "UI", Retired: false},
-	0x00020010: &DictEntry{Tag: 0x00020010, Name: "TransferSyntaxUID", NameHuman: "Transfer Syntax UID", VR: "UI", Retired: false},
-	0x00020012: &DictEntry{Tag: 0x00020012, Name: "ImplementationClassUID", NameHuman: "Implementation Class UID", VR: "UI", Retired: false},
-	0x00020013: &DictEntry{Tag: 0x00020013, Name: "ImplementationVersionName", NameHuman: "Implementation Version Name", VR: "SH", Retired: false},
-	0x00020016: &DictEntry{Tag: 0x00020016, Name: "SourceApplicationEntityTitle", NameHuman: "Source Application Entity Title", VR: "AE", Retired: false},
-
 `
+	for _, v := range y {
+		outCode += fmt.Sprintf(`    0x%08X: &DictEntry{Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", Retired: %v},`, uint32(v.Tag), uint32(v.Tag), v.Name, v.NameHuman, v.VR, v.Retired) + "\n"
+	}
 	for _, v := range x {
 		outCode += fmt.Sprintf(`    0x%08X: &DictEntry{Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", Retired: %v},`, uint32(v.Tag), uint32(v.Tag), v.Name, v.NameHuman, v.VR, v.Retired) + "\n"
 	}

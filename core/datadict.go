@@ -1,17 +1,21 @@
-package core
 // Code generated using util:gendatadict. DO NOT EDIT.
+
+package core
 
 // DicomDictionary provides a mapping between uint32 representation of a DICOM Tag and a DictEntry pointer.
 var DicomDictionary = map[uint32]*DictEntry{
-	0x00020000: &DictEntry{Tag: 0x00020000, Name: "FileMetaInformationGroupLength", NameHuman: "File Meta Information Group Length", VR: "UL", Retired: false},
+    0x00020000: &DictEntry{Tag: 0x00020000, Name: "FileMetaInformationGroupLength", NameHuman: "File Meta Information Group Length", VR: "UL", Retired: false},
     0x00020001: &DictEntry{Tag: 0x00020001, Name: "FileMetaInformationVersion", NameHuman: "File Meta Information Version", VR: "OB", Retired: false},
     0x00020002: &DictEntry{Tag: 0x00020002, Name: "MediaStorageSOPClassUID", NameHuman: "Media Storage SOP Class UID", VR: "UI", Retired: false},
     0x00020003: &DictEntry{Tag: 0x00020003, Name: "MediaStorageSOPInstanceUID", NameHuman: "Media Storage SOP Instance UID", VR: "UI", Retired: false},
-	0x00020010: &DictEntry{Tag: 0x00020010, Name: "TransferSyntaxUID", NameHuman: "Transfer Syntax UID", VR: "UI", Retired: false},
-	0x00020012: &DictEntry{Tag: 0x00020012, Name: "ImplementationClassUID", NameHuman: "Implementation Class UID", VR: "UI", Retired: false},
-	0x00020013: &DictEntry{Tag: 0x00020013, Name: "ImplementationVersionName", NameHuman: "Implementation Version Name", VR: "SH", Retired: false},
-	0x00020016: &DictEntry{Tag: 0x00020016, Name: "SourceApplicationEntityTitle", NameHuman: "Source Application Entity Title", VR: "AE", Retired: false},
-
+    0x00020010: &DictEntry{Tag: 0x00020010, Name: "TransferSyntaxUID", NameHuman: "Transfer Syntax UID", VR: "UI", Retired: false},
+    0x00020012: &DictEntry{Tag: 0x00020012, Name: "ImplementationClassUID", NameHuman: "Implementation Class UID", VR: "UI", Retired: false},
+    0x00020013: &DictEntry{Tag: 0x00020013, Name: "ImplementationVersionName", NameHuman: "Implementation Version Name", VR: "SH", Retired: false},
+    0x00020016: &DictEntry{Tag: 0x00020016, Name: "SourceApplicationEntityTitle", NameHuman: "Source Application Entity Title", VR: "AE", Retired: false},
+    0x00020017: &DictEntry{Tag: 0x00020017, Name: "SendingApplicationEntityTitle", NameHuman: "Sending Application Entity Title", VR: "AE", Retired: false},
+    0x00020018: &DictEntry{Tag: 0x00020018, Name: "ReceivingApplicationEntityTitle", NameHuman: "Receiving Application Entity Title", VR: "AE", Retired: false},
+    0x00020100: &DictEntry{Tag: 0x00020100, Name: "PrivateInformationCreatorUID", NameHuman: "Private Information Creator UID", VR: "UI", Retired: false},
+    0x00020102: &DictEntry{Tag: 0x00020102, Name: "PrivateInformation", NameHuman: "Private Information", VR: "OB", Retired: false},
     0x00080001: &DictEntry{Tag: 0x00080001, Name: "LengthToEnd", NameHuman: "Length To End", VR: "UL", Retired: true},
     0x00080005: &DictEntry{Tag: 0x00080005, Name: "SpecificCharacterSet", NameHuman: "Specific Character Set", VR: "CS", Retired: false},
     0x00080006: &DictEntry{Tag: 0x00080006, Name: "LanguageCodeSequence", NameHuman: "Language Code Sequence", VR: "SQ", Retired: false},

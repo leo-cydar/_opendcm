@@ -50,7 +50,7 @@ func LookupTag(t uint32) (*DictEntry, bool) {
 
 func (e Element) Value() interface{} {
 	switch e.VR {
-	case "UI", "SH", "UT", "ST", "PN", "OW", "LT", "IS", "DS", "CS", "AS", "AE":
+	case "UI", "SH", "UT", "ST", "PN", "OW", "LT", "IS", "DS", "CS", "AS", "AE", "LO":
 		return string(e.value.Bytes())
 	case "UL":
 		return binary.LittleEndian.Uint32(e.value.Bytes())
