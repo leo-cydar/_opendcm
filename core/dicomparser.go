@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -24,15 +25,13 @@ type TransferSyntax struct {
 
 // https://nathanleclaire.com/blog/2014/08/09/dont-get-bitten-by-pointer-vs-non-pointer-method-receivers-in-golang/
 func (ts *TransferSyntax) SetFromUID(uidstr string) error {
-	log.Printf("SetFromUID: %s", uidstr)
 	uidptr, err := LookupUID(uidstr)
 	if err != nil {
 		return err
 	}
 	ts.UIDEntry = uidptr
 	ts.Encoding = GetEncodingForTransferSyntax(*ts)
-	log.Printf("Switched! to Reader Transfer Syntax UID: %v", uidptr)
-	log.Printf("Encoding: %v", ts.Encoding)
+	log.Printf("Using '%v'  (ImplicitVR: %v, LittleEndian: %v)", ts.UIDEntry.NameHuman, ts.Encoding.ImplicitVR, ts.Encoding.LittleEndian)
 	return nil
 }
 
@@ -75,15 +74,11 @@ func NewDicomFileReader(path string) (DicomFileReader, error) {
 	uid, _ := LookupUID("1.2.840.10008.1.2.1")
 	reader.TransferSyntax.UIDEntry = uid
 	reader.TransferSyntax.Encoding = GetEncodingForTransferSyntax(reader.TransferSyntax)
-	err := reader.BufferFromFile(1024)
-	if err != nil {
-		return reader, err
-	}
 	return reader, nil
 }
 
 // ReadElement yields an `Element` from the active buffer, and an `error` if something went wrong.
-func (dr DicomFileReader) ReadElement() (Element, error) {
+func (dr *DicomFileReader) ReadElement() (Element, error) {
 	element := Element{}
 	lower, err := dr.readUint16()
 	if err != nil {
@@ -133,25 +128,84 @@ func (dr DicomFileReader) ReadElement() (Element, error) {
 			return element, err
 		}
 	}
-	valuebuf := make([]byte, element.ValueLength)
-	// TODO: string padding -- should remove trailing 0x00 / 0x20 bytes (see: http://dicom.nema.org/dicom/2013/output/chtml/part05/sect_6.2.html)
-	err = dr.read(valuebuf)
-	if err != nil {
-		return element, err
+	if element.ValueLength == 0xFFFFFFFF {
+		items, err := dr.readSequence()
+		if err != nil {
+			return element, err
+		}
+		element.Items = items
+		byteLength := uint32(0)
+		for _, item := range items {
+			byteLength += item.Length
+		}
+		element.ValueLength = byteLength
+	} else {
+		valuebuf := make([]byte, element.ValueLength)
+		// TODO: string padding -- should remove trailing 0x00 / 0x20 bytes (see: http://dicom.nema.org/dicom/2013/output/chtml/part05/sect_6.2.html)
+		if element.ValueLength > 0 {
+			err = dr.read(valuebuf)
+			if err != nil {
+				return element, err
+			}
+			padchar := byte(0xFF)
+			switch element.VR {
+			case "UI", "OB":
+				padchar = 0x00
+			case "AE", "AS", "CS", "DA", "DS", "DT", "IS", "LO", "LT", "OD", "OF", "OW", "PN", "SH", "ST", "TM", "UT":
+				padchar = 0x20
+			}
+			if padchar != 0xFF && valuebuf[len(valuebuf)-1] == padchar {
+				valuebuf = valuebuf[:len(valuebuf)-1]
+			}
+		}
+
+		element.value = bytes.NewBuffer(valuebuf)
 	}
-	padchar := byte(0xFF)
-	switch element.VR {
-	case "UI", "OB":
-		padchar = 0x00
-	case "AE", "AS", "CS", "DA", "DS", "DT", "IS", "LO", "LT", "OD", "OF", "OW", "PN", "SH", "ST", "TM", "UT":
-		padchar = 0x20
-	}
-	if padchar != 0xFF && valuebuf[len(valuebuf)-1] == padchar {
-		valuebuf = valuebuf[:len(valuebuf)-1]
-	}
-	element.value = bytes.NewBuffer(valuebuf)
 
 	return element, nil
+}
+
+// readSequence parses a sequence of "unlimited length" from the bytestream
+func (dr DicomFileReader) readSequence() ([]Item, error) {
+	var items []Item
+	for {
+		lower, err := dr.readUint16()
+		if err != nil {
+			return nil, err
+		}
+		upper, err := dr.readUint16()
+		if err != nil {
+			return nil, err
+		}
+		tagUint32 := (uint32(lower) << 16) | uint32(upper)
+		if tagUint32 == 0xFFFEE0DD {
+			err := dr.skipBytes(4)
+			if err != nil {
+				return items, err
+			}
+			break
+		}
+		if tagUint32 != 0xFFFEE000 {
+			return items, fmt.Errorf("0x%08X != 0xFFFEE000", tagUint32)
+		}
+		length, err := dr.readUint32()
+		if err != nil {
+			return nil, err
+		}
+		if length == 0xFFFFFFFF {
+			return items, errors.New("unlimited length ITEM not supported")
+		}
+		valuebuf := make([]byte, length)
+		// TODO: string padding -- should remove trailing 0x00 / 0x20 bytes (see: http://dicom.nema.org/dicom/2013/output/chtml/part05/sect_6.2.html)
+		err = dr.read(valuebuf)
+		if err != nil {
+			return items, err
+		}
+		item := Item{Length: length, Value: bytes.NewBuffer(valuebuf)}
+		items = append(items, item)
+	}
+
+	return items, nil
 }
 
 func (dr DicomFileReader) skipBytes(num int64) error {
@@ -207,19 +261,31 @@ func (fb DicomFileReader) readBytes(num int) ([]byte, error) {
 	return buf, nil
 }
 
-func (fb *DicomFileReader) BufferFromFile(nbytes int) error {
+func (fb *DicomFileReader) BufferFromFile(nstart int64, nbytes int) error {
 	f, err := os.Open(fb.FilePath)
-	check(err)
+	if err != nil {
+		return err
+	}
 	defer f.Close()
 	stat, err := f.Stat()
-	check(err)
+	if err != nil {
+		return err
+	}
+
 	var bufferSize int64
 	if nbytes == -1 {
 		bufferSize = stat.Size()
 	} else {
 		bufferSize = int64(nbytes)
 	}
+	if nstart > -1 {
+		bufferSize -= nstart
+	}
 	buffer := make([]byte, bufferSize)
+
+	if nstart > -1 {
+		f.Seek(nstart, io.SeekStart)
+	}
 	nread, err := f.Read(buffer)
 	if int64(nread) < bufferSize || err != nil {
 		return err
@@ -229,9 +295,8 @@ func (fb *DicomFileReader) BufferFromFile(nbytes int) error {
 	return nil
 }
 
-func (df DicomFile) CrawlMeta() error {
-	df.Reader._reader.Seek(0, io.SeekStart)
-	err := df.Reader.BufferFromFile(1024)
+func (df *DicomFile) CrawlMeta() error {
+	err := df.Reader.BufferFromFile(-1, 1024)
 	if err != nil {
 		return err
 	}
@@ -251,19 +316,16 @@ func (df DicomFile) CrawlMeta() error {
 
 	metaLengthElement, err := df.Reader.ReadElement()
 	check(err)
-	totalBytesMeta := df.Reader.getPosition() + int64(metaLengthElement.Value().(uint32))
+	df.TotalMetaBytes = df.Reader.getPosition() + int64(metaLengthElement.Value().(uint32))
 	for {
 		element, err := df.Reader.ReadElement()
 		if err != nil {
-			if err == io.EOF {
-				break
-			} else {
-				return err
-			}
+			log.Printf("Error parsing metadata: %v (RemainingBytes: %d)", err, df.TotalMetaBytes-df.Reader.getPosition())
+			return err
 		}
 		df.Elements[uint32(element.Tag)] = element
 
-		if df.Reader.getPosition() >= totalBytesMeta {
+		if df.Reader.getPosition() >= df.TotalMetaBytes {
 			break
 		}
 	}
@@ -272,7 +334,7 @@ func (df DicomFile) CrawlMeta() error {
 }
 
 func (df DicomFile) CrawlElements() error {
-	err := df.Reader.BufferFromFile(-1)
+	err := df.Reader.BufferFromFile(df.TotalMetaBytes, -1)
 	if err != nil {
 		return err
 	}
@@ -294,15 +356,12 @@ func (df DicomFile) CrawlElements() error {
 	for {
 		element, err := df.Reader.ReadElement()
 		if err != nil {
-			if err == io.EOF {
-				break
-			} else {
-				return err
-			}
+			log.Printf("Error parsing %v (RemainingBytes: %d)", err, df.Reader.getPosition()+df.TotalMetaBytes-fileSize)
+			return err
 		}
 		df.Elements[uint32(element.Tag)] = element
 
-		if df.Reader.getPosition() >= fileSize {
+		if df.Reader.getPosition()+df.TotalMetaBytes >= fileSize {
 			break
 		}
 	}
