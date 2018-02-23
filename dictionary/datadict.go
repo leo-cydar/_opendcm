@@ -1,7 +1,30 @@
 // Code generated using util:gendatadict. DO NOT EDIT.
 
-package core
+package dictionary
 
+import ("fmt")
+
+type Tag uint32
+
+type DictEntry struct {
+	Tag       Tag
+	NameHuman string
+	Name      string
+	VR        string
+	Retired   bool
+}
+
+type UIDEntry struct {
+	UID       string
+	Type      string
+	NameHuman string
+}
+
+func (t Tag) String() string {
+	upper := uint32(t) >> 16
+	lower := uint32(t) & 0xff
+	return fmt.Sprintf("(%04X,%04X)", upper, lower)
+}
 // DicomDictionary provides a mapping between uint32 representation of a DICOM Tag and a DictEntry pointer.
 var DicomDictionary = map[uint32]*DictEntry{
     // File Meta Elements

@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
+	"github.com/b71729/opendcm/dictionary"
 )
 
 type DicomFileMeta struct {
@@ -24,47 +26,25 @@ func (df DicomFile) GetElement(tag uint32) (Element, bool) {
 }
 
 type Element struct {
-	*DictEntry
+	*dictionary.DictEntry
 	ValueLength uint32
 	value       *bytes.Buffer
 }
 
-type Tag uint32
-
-type DictEntry struct {
-	Tag       Tag
-	NameHuman string
-	Name      string
-	VR        string
-	Retired   bool
-}
-
-type UIDEntry struct {
-	UID       string
-	Type      string
-	NameHuman string
-}
-
-func (t Tag) String() string {
-	upper := uint32(t) >> 16
-	lower := uint32(t) & 0xff
-	return fmt.Sprintf("(%04X,%04X)", upper, lower)
-}
-
-func LookupTag(t uint32) (*DictEntry, bool) {
-	val, ok := DicomDictionary[t]
+func LookupTag(t uint32) (*dictionary.DictEntry, bool) {
+	val, ok := dictionary.DicomDictionary[t]
 	if !ok {
-		tag := Tag(t)
+		tag := dictionary.Tag(t)
 		name := fmt.Sprintf("Unknown%s", tag)
-		return &DictEntry{Tag: tag, Name: name, NameHuman: name, VR: "UN", Retired: false}, false
+		return &dictionary.DictEntry{Tag: tag, Name: name, NameHuman: name, VR: "UN", Retired: false}, false
 	}
 	return val, ok
 }
 
-func LookupUID(uid string) (*UIDEntry, error) {
-	val, ok := UIDDictionary[uid]
+func LookupUID(uid string) (*dictionary.UIDEntry, error) {
+	val, ok := dictionary.UIDDictionary[uid]
 	if !ok {
-		return &UIDEntry{}, errors.New("could not find UID")
+		return &dictionary.UIDEntry{}, errors.New("could not find UID")
 	}
 	return val, nil
 }

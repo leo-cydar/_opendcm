@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/b71729/opendcm/core"
+	"github.com/b71729/opendcm/dictionary"
 )
 
 func check(e error) {
@@ -39,7 +39,7 @@ func eachToken(data string, cb func(token string)) {
 }
 
 // ParseDataElements accepts a string buffer, and returns an array of `DictEntry`
-func ParseDataElements(data string) (elements []core.DictEntry) {
+func ParseDataElements(data string) (elements []dictionary.DictEntry) {
 	index := -1
 	mode := -1
 	eachToken(data, func(token string) {
@@ -49,12 +49,12 @@ func ParseDataElements(data string) (elements []core.DictEntry) {
 		}
 		switch mode {
 		case 1:
-			elements = append(elements, core.DictEntry{})
+			elements = append(elements, dictionary.DictEntry{})
 			tagString := token[1:][:9]
 			tagString = strings.Replace(tagString, ",", "", 1)
 			tagInt, err := strconv.ParseUint(tagString, 16, 32)
 			check(err)
-			elements[index].Tag = core.Tag(tagInt)
+			elements[index].Tag = dictionary.Tag(tagInt)
 			elements[index].Retired = false
 		case 2:
 			elements[index].NameHuman = token
@@ -83,7 +83,7 @@ func ParseDataElements(data string) (elements []core.DictEntry) {
 }
 
 // ParseUIDs accepts a string buffer, and returns an array of `UIDEntry`
-func ParseUIDs(data string) (uids []core.UIDEntry) {
+func ParseUIDs(data string) (uids []dictionary.UIDEntry) {
 	index := -1
 	mode := -1
 	eachToken(data, func(token string) {
@@ -93,7 +93,7 @@ func ParseUIDs(data string) (uids []core.UIDEntry) {
 		}
 		switch mode {
 		case 1:
-			uids = append(uids, core.UIDEntry{})
+			uids = append(uids, dictionary.UIDEntry{})
 			uids[index].UID = strings.Replace(token, " ", "", -1)
 		case 2:
 			uids[index].NameHuman = token
@@ -168,12 +168,35 @@ func main() {
 	log.Printf("Found %d UIDs elements\n", len(UIDs))
 
 	// build golang string
-	outF, err := os.Create("../../core/datadict.go")
+	outF, err := os.Create("../../dictionary/datadict.go")
 	check(err)
 	outCode := `// Code generated using util:gendatadict. DO NOT EDIT.
 
-package core
+package dictionary
 
+import ("fmt")
+
+type Tag uint32
+
+type DictEntry struct {
+	Tag       Tag
+	NameHuman string
+	Name      string
+	VR        string
+	Retired   bool
+}
+
+type UIDEntry struct {
+	UID       string
+	Type      string
+	NameHuman string
+}
+
+func (t Tag) String() string {
+	upper := uint32(t) >> 16
+	lower := uint32(t) & 0xff
+	return fmt.Sprintf("(%04X,%04X)", upper, lower)
+}
 // DicomDictionary provides a mapping between uint32 representation of a DICOM Tag and a DictEntry pointer.
 var DicomDictionary = map[uint32]*DictEntry{
 `

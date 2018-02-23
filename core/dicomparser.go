@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"os"
+
+	"github.com/b71729/opendcm/dictionary"
 )
 
 func check(e error) {
@@ -16,19 +18,21 @@ func check(e error) {
 }
 
 type TransferSyntax struct {
-	UIDEntry *UIDEntry
+	UIDEntry *dictionary.UIDEntry
 	Encoding *Encoding
 }
 
-func (ts TransferSyntax) SetFromUID(uidstr string) error {
+// https://nathanleclaire.com/blog/2014/08/09/dont-get-bitten-by-pointer-vs-non-pointer-method-receivers-in-golang/
+func (ts *TransferSyntax) SetFromUID(uidstr string) error {
 	log.Printf("SetFromUID: %s", uidstr)
 	uidptr, err := LookupUID(uidstr)
 	if err != nil {
 		return err
 	}
 	ts.UIDEntry = uidptr
-	ts.Encoding = GetEncodingForTransferSyntax(ts)
-	log.Printf("Switched to Reader Transfer Syntax UID: %v", uidptr)
+	ts.Encoding = GetEncodingForTransferSyntax(*ts)
+	log.Printf("Switched! to Reader Transfer Syntax UID: %v", uidptr)
+	log.Printf("Encoding: %v", ts.Encoding)
 	return nil
 }
 
@@ -55,39 +59,26 @@ func GetEncodingForTransferSyntax(ts TransferSyntax) *Encoding {
 			return encoding
 		}
 	}
-	return TransferSyntaxToEncodingMap["1.2.840.10008.1.2"] // fallback (default)
+	return TransferSyntaxToEncodingMap["1.2.840.10008.1.2.1"] // fallback (default)
 }
 
 // DicomFileReader provides an abstraction layer around a `byees.Reader` to facilitate easier parsing.
 type DicomFileReader struct {
 	_reader        *bytes.Reader
+	FilePath       string
 	Position       int64
 	TransferSyntax TransferSyntax
 }
 
 func NewDicomFileReader(path string) (DicomFileReader, error) {
-	reader := DicomFileReader{Position: 0, TransferSyntax: TransferSyntax{}}
+	reader := DicomFileReader{Position: 0, TransferSyntax: TransferSyntax{}, FilePath: path}
 	uid, _ := LookupUID("1.2.840.10008.1.2.1")
 	reader.TransferSyntax.UIDEntry = uid
 	reader.TransferSyntax.Encoding = GetEncodingForTransferSyntax(reader.TransferSyntax)
-	f, err := os.Open(path)
-	check(err)
-	defer f.Close()
-	stat, err := f.Stat()
-	check(err)
-	if stat.Size() < int64(132) {
-		return reader, errors.New("Not a dicom file")
+	err := reader.BufferFromFile(1024)
+	if err != nil {
+		return reader, err
 	}
-
-	bufferSize := int64(1024)
-	fileSize := stat.Size()
-	if fileSize < 1024 {
-		bufferSize = fileSize
-	}
-	buffer := make([]byte, bufferSize)
-	f.Read(buffer)
-	r := bytes.NewReader(buffer)
-	reader._reader = r
 	return reader, nil
 }
 
@@ -156,7 +147,7 @@ func (dr DicomFileReader) ReadElement() (Element, error) {
 		padchar = 0x20
 	}
 	if padchar != 0xFF && valuebuf[len(valuebuf)-1] == padchar {
-		valuebuf = valuebuf[:len(valuebuf)-2]
+		valuebuf = valuebuf[:len(valuebuf)-1]
 	}
 	element.value = bytes.NewBuffer(valuebuf)
 
@@ -216,8 +207,34 @@ func (fb DicomFileReader) readBytes(num int) ([]byte, error) {
 	return buf, nil
 }
 
+func (fb *DicomFileReader) BufferFromFile(nbytes int) error {
+	f, err := os.Open(fb.FilePath)
+	check(err)
+	defer f.Close()
+	stat, err := f.Stat()
+	check(err)
+	var bufferSize int64
+	if nbytes == -1 {
+		bufferSize = stat.Size()
+	} else {
+		bufferSize = int64(nbytes)
+	}
+	buffer := make([]byte, bufferSize)
+	nread, err := f.Read(buffer)
+	if int64(nread) < bufferSize || err != nil {
+		return err
+	}
+	r := bytes.NewReader(buffer)
+	fb._reader = r
+	return nil
+}
+
 func (df DicomFile) CrawlMeta() error {
 	df.Reader._reader.Seek(0, io.SeekStart)
+	err := df.Reader.BufferFromFile(1024)
+	if err != nil {
+		return err
+	}
 
 	preamble, err := df.Reader.readBytes(128)
 	if err != nil {
@@ -255,6 +272,10 @@ func (df DicomFile) CrawlMeta() error {
 }
 
 func (df DicomFile) CrawlElements() error {
+	err := df.Reader.BufferFromFile(-1)
+	if err != nil {
+		return err
+	}
 	// change transfer syntax if necessary
 	transfersyntaxuid, ok := df.GetElement(0x0020010)
 	if ok {
@@ -262,10 +283,9 @@ func (df DicomFile) CrawlElements() error {
 		df.Reader.TransferSyntax = TransferSyntax{}
 		err := df.Reader.TransferSyntax.SetFromUID(s)
 		if err != nil {
+			log.Fatalln(err)
 			return err
 		}
-		log.Printf("Switched to Reader Transfer Syntax UID: %v", df.Reader.TransferSyntax.UIDEntry)
-		log.Printf("Implicit VR: %v, Little Endian: %v", df.Reader.TransferSyntax.Encoding.ImplicitVR, df.Reader.TransferSyntax.Encoding.LittleEndian)
 	}
 
 	// now parse rest of elements:
@@ -292,6 +312,7 @@ func (df DicomFile) CrawlElements() error {
 
 func ParseDicom(path string) (DicomFile, error) {
 	dcm := DicomFile{}
+	dcm.filepath = path
 	dcm.Elements = make(map[uint32]Element)
 	dr, err := NewDicomFileReader(path)
 	if err != nil {
