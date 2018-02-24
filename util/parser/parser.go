@@ -33,22 +33,9 @@ func main() {
 		}
 		sort.Sort(core.ByTag(elements))
 		for _, element := range elements {
-			if len(element.Items) > 0 {
-				log.Printf("[%s] %s %s:", element.VR, element.Tag, element.Name)
-				for _, item := range element.Items {
-					for _, e := range item.Elements {
-						log.Printf("     - %s [%s] %v", e.Tag, e.VR, e.Value())
-					}
-
-					for _, b := range item.UnknownSections {
-						log.Printf("     - (%d bytes) (not parsed)", len(b))
-					}
-				}
-			}
-			if element.ValueLength < 256 {
-				log.Printf("[%s] %s (%d bytes) %s = %v", element.VR, element.Tag, element.ValueLength, element.Name, element.Value())
-			} else {
-				log.Printf("[%s] %s (%d bytes) %s", element.VR, element.Tag, element.ValueLength, element.Name)
+			description := element.Describe()
+			for _, line := range description {
+				log.Println(line)
 			}
 		}
 		if err != nil {
@@ -87,12 +74,6 @@ func main() {
 					log.Printf("skipped %s (not a dicom file)", dcm.DicomFile.Reader.FilePath)
 				default:
 					log.Printf("DICOM parsing error: %v", dcm.Error)
-				}
-			} else {
-				IN, foundIN := dcm.DicomFile.GetElement(0x00200013)
-				PN, foundPN := dcm.DicomFile.GetElement(0x00100010)
-				if foundIN && foundPN {
-					log.Printf("%s InstanceNumber: %s", PN.Value().(string), IN.Value().(string))
 				}
 			}
 		}

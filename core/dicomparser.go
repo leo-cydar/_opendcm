@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"regexp"
 
 	"github.com/b71729/opendcm/dictionary"
 )
@@ -49,7 +50,76 @@ var TransferSyntaxToEncodingMap = map[string]*Encoding{
 	"1.2.840.10008.1.2.2":    &Encoding{ImplicitVR: false, LittleEndian: false},
 }
 
-var metaEndPosition = int64(0)
+type VRSpecification struct {
+	VR                 string
+	MaximumLengthBytes uint32
+	FixedLength        bool
+	CharsetRe          *regexp.Regexp
+}
+
+var defaultCharsetRe = regexp.MustCompile("^[[:ascii:]]+$")
+var defaultCharsetReadbleOnlyRe = regexp.MustCompile("^([\x00-\x09|\x13|\x16-\x1A|\x1C-\x5B]|[\x5D-\x7F])+$")
+var ageStringRe = regexp.MustCompile("^[0-9DWMY]+$")
+var codeStringRe = regexp.MustCompile(`^[A-Z0-9_ \\]+$`)
+var dateRe = regexp.MustCompile("^[0-9-]+$")
+var decimalStringRe = regexp.MustCompile(`^[0-9+-Ee\.\\]+$`)
+var dateTimeRe = regexp.MustCompile("^[0-9+-\\.]+$")
+var integerStringRe = regexp.MustCompile("^[0-9+-]+$")
+var patientNameRe = regexp.MustCompile("^([\x00-\x09|\x13|\x16-\x5B]|[\x5D-\x7F])+$")
+var timeRe = regexp.MustCompile("^[0-9-\\. ]+$")
+var uniqueIdentifierRe = regexp.MustCompile("^[0-9\\.]+$")
+
+//  excluding character code 5CH (the BACKSLASH "\"), and control characters LF, FF, CR and ESC.
+
+var VRConformanceMap = map[string]*VRSpecification{
+	"AE": &VRSpecification{VR: "AE", MaximumLengthBytes: 16, CharsetRe: defaultCharsetReadbleOnlyRe},
+	"AS": &VRSpecification{VR: "AS", MaximumLengthBytes: 4, CharsetRe: ageStringRe, FixedLength: true},
+	"AT": &VRSpecification{VR: "AT", MaximumLengthBytes: 4, CharsetRe: nil, FixedLength: true},
+	"CS": &VRSpecification{VR: "CS", MaximumLengthBytes: 0xFFFFFFFF, CharsetRe: codeStringRe},
+	"DA": &VRSpecification{VR: "DA", MaximumLengthBytes: 18, CharsetRe: dateRe},
+	"DS": &VRSpecification{VR: "DS", MaximumLengthBytes: 0xFFFFFFFF, CharsetRe: decimalStringRe},
+	"DT": &VRSpecification{VR: "DT", MaximumLengthBytes: 54, CharsetRe: dateTimeRe},
+	"FL": &VRSpecification{VR: "FL", MaximumLengthBytes: 4, CharsetRe: nil, FixedLength: true},
+	"FD": &VRSpecification{VR: "FD", MaximumLengthBytes: 8, CharsetRe: nil, FixedLength: true},
+	"IS": &VRSpecification{VR: "IS", MaximumLengthBytes: 12, CharsetRe: integerStringRe},
+	"LO": &VRSpecification{VR: "LO", MaximumLengthBytes: 64, CharsetRe: defaultCharsetRe},
+	"LT": &VRSpecification{VR: "LT", MaximumLengthBytes: 10240, CharsetRe: defaultCharsetRe},
+	"OB": &VRSpecification{VR: "OB", MaximumLengthBytes: 0xFFFFFFFF},
+	"OD": &VRSpecification{VR: "OD", MaximumLengthBytes: 0xFFFFFFF8},
+	"OF": &VRSpecification{VR: "OF", MaximumLengthBytes: 0xFFFFFFFC},
+	"OW": &VRSpecification{VR: "OW", MaximumLengthBytes: 0xFFFFFFFF},
+	"PN": &VRSpecification{VR: "PN", MaximumLengthBytes: (64 * 5), CharsetRe: patientNameRe},
+	"SH": &VRSpecification{VR: "SH", MaximumLengthBytes: 16, CharsetRe: defaultCharsetRe}, // NOTE: ambiguity in spec
+	"SL": &VRSpecification{VR: "SL", MaximumLengthBytes: 4, FixedLength: true},
+	"SQ": &VRSpecification{VR: "SQ", MaximumLengthBytes: 0xFFFFFFFF},
+	"SS": &VRSpecification{VR: "SS", MaximumLengthBytes: 2, FixedLength: true},
+	"ST": &VRSpecification{VR: "ST", MaximumLengthBytes: 1024, CharsetRe: defaultCharsetRe},
+	"TM": &VRSpecification{VR: "TM", MaximumLengthBytes: 28, CharsetRe: timeRe},
+	"UI": &VRSpecification{VR: "UI", MaximumLengthBytes: 64, CharsetRe: uniqueIdentifierRe},
+	"UL": &VRSpecification{VR: "UL", MaximumLengthBytes: 4, FixedLength: true},
+	"UN": &VRSpecification{VR: "UN", MaximumLengthBytes: 0xFFFFFFFF},
+	"US": &VRSpecification{VR: "US", MaximumLengthBytes: 2, FixedLength: true},
+	"UT": &VRSpecification{VR: "UT", MaximumLengthBytes: 0xFFFFFFFE, CharsetRe: defaultCharsetRe},
+}
+
+func (element Element) CheckConformance() bool {
+	specification, found := VRConformanceMap[element.VR]
+	if !found {
+		log.Fatalf("Could not find conformance for VR %s", element.VR)
+	}
+	if specification.CharsetRe == nil || element.ValueLength == 0 || specification.CharsetRe.Match(element.value.Bytes()) {
+		if specification.FixedLength && element.ValueLength == specification.MaximumLengthBytes {
+			return true
+		}
+		if specification.MaximumLengthBytes != 0xFFFFFF {
+			if element.ValueLength <= specification.MaximumLengthBytes {
+				return true
+			}
+		}
+	}
+
+	return false
+}
 
 // GetEncodingForTransferSyntax returns the encoding for a given TransferSyntax, or defaults.
 func GetEncodingForTransferSyntax(ts TransferSyntax) *Encoding {
@@ -139,21 +209,25 @@ func (dr *DicomFileReader) ReadElement() (Element, error) {
 		element.Items = items
 	} else {
 		valuebuf := make([]byte, element.ValueLength)
-		// TODO: string padding -- should remove trailing 0x00 / 0x20 bytes (see: http://dicom.nema.org/dicom/2013/output/chtml/part05/sect_6.2.html)
+		// string padding: should remove trailing+leading 0x00 / 0x20 bytes (see: http://dicom.nema.org/dicom/2013/output/chtml/part05/sect_6.2.html)
+		// NOTE: some vendors pad with 0x20, some 0x00 -- seems to contradict NEMA spec. Let's account for both then:
 		if element.ValueLength > 0 {
 			err = dr.read(valuebuf)
 			if err != nil {
 				return element, err
 			}
-			padchar := byte(0xFF)
+			padchars := []byte{0x00, 0x20}
 			switch element.VR {
-			case "UI", "OB":
-				padchar = 0x00
-			case "AE", "AS", "CS", "DA", "DS", "DT", "IS", "LO", "LT", "OD", "OF", "OW", "PN", "SH", "ST", "TM", "UT":
-				padchar = 0x20
-			}
-			if padchar != 0xFF && valuebuf[len(valuebuf)-1] == padchar {
-				valuebuf = valuebuf[:len(valuebuf)-1]
+			case "UI", "OB", "CS", "DS", "IS", "AE", "AS", "DA", "DT", "LO", "LT", "OD", "OF", "OW", "PN", "SH", "ST", "TM", "UT":
+				for _, chr := range padchars {
+					if valuebuf[len(valuebuf)-1] == chr {
+						valuebuf = valuebuf[:len(valuebuf)-1]
+						element.ValueLength--
+					} else if valuebuf[0] == chr { // NOTE: assumes padding will only take place on one side. Should be fine.
+						valuebuf = valuebuf[1:]
+						element.ValueLength--
+					}
+				}
 			}
 		}
 		element.value = bytes.NewBuffer(valuebuf)
@@ -162,28 +236,24 @@ func (dr *DicomFileReader) ReadElement() (Element, error) {
 	return element, nil
 }
 
-func (dr *DicomFileReader) getFullPosition() int64 {
-	return metaEndPosition + dr.getPosition()
-}
-
 func (dr *DicomFileReader) readUntil(delimiter []byte) ([]byte, error) {
-	if len(delimiter) > 4 {
+	if len(delimiter) > 8 {
 		panic("does not support delimiters with length greater than 8 bytes")
 	}
 	var buf []byte
 	for {
-		currentBuffer, err := dr.readBytes(132) // 128 bytes plus maximum 4 bytes for delimiter boundary
+		currentBuffer, err := dr.readBytes(136) // 128 bytes plus maximum 8 bytes for delimiter boundary
 		if err != nil {
-			return buf, fmt.Errorf("readBytes(132) failed: %v. Current Position: %d", err, dr.getFullPosition())
+			return buf, fmt.Errorf("readBytes(136) failed: %v", err)
 		}
 		delimiterPos := bytes.Index(currentBuffer, delimiter)
 		if delimiterPos >= 0 { // found
 			buf = append(buf[:], currentBuffer[:delimiterPos]...)
-			_, err = dr._reader.Seek(-int64(132-delimiterPos), io.SeekCurrent)
+			_, err = dr._reader.Seek(-int64(136-delimiterPos), io.SeekCurrent)
 			return buf, nil
 		}
 		buf = append(buf[:], currentBuffer[:128]...)
-		_, err = dr._reader.Seek(-4, io.SeekCurrent)
+		_, err = dr._reader.Seek(-8, io.SeekCurrent)
 		if err != nil {
 			return buf, err
 		}
@@ -259,30 +329,21 @@ func (dr *DicomFileReader) readSequence(parseElements bool) ([]Item, error) {
 				unknownBuffers = append(unknownBuffers, valuebuffer)
 			} else {
 				if length == 0 {
-					continue // TODO: Why does this come out as 0 sometimes?
+					continue
 					/* Turns out the data set had bytes:
 					(40 00 08 00) (53 51)  00 00 (FF FF  FF FF) (FE FF  00 E0) (00 00  00 00) (FE FF  DD E0) 00 00
 					(4b: tag)     (2b:SQ)        (4b: un.len)   (4b:itm start) (4b: 0 len)    (4b: seq end)
 					Therefore, the item genuinely had length of zero.
-					This condition accounts for this.
+					This condition accounts for this possibility.
 					*/
 				}
-				e, err := dr.ReadElement()
+				element, err := dr.ReadElement()
 				if err != nil {
 					panic(err)
 				}
-				elements[uint32(e.Tag)] = e
+				elements[uint32(element.Tag)] = element
 			}
 		}
-
-		// if !dr.TransferSyntax.Encoding.ImplicitVR {
-		// 	// if VR is explicit, it will be immediately following data definition, let's parse that:
-		// 	if len(valuebuf) > 2 {
-		// 		log.Printf("asd: %d, %v", dr.getPosition(), valuebuf[:8])
-		// 		VR = string(valuebuf[:2])
-		// 		valuebuf = valuebuf[2:]
-		// 	}
-		// }
 		item := Item{Elements: elements, UnknownSections: unknownBuffers}
 		items = append(items, item)
 
@@ -499,7 +560,6 @@ func ParseDicom(path string) (DicomFile, error) {
 	if err := dcm.CrawlMeta(); err != nil {
 		return dcm, err
 	}
-	metaEndPosition = dcm.Reader.getPosition()
 	if err = dcm.CrawlElements(); err != nil {
 		return dcm, err
 	}

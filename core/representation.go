@@ -80,12 +80,7 @@ func (a ByTag) Len() int           { return len(a) }
 func (a ByTag) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByTag) Less(i, j int) bool { return a[i].Tag < a[j].Tag }
 
-// Value returns an appropriate representation of the underlying bytestream according to VR
-func (i Item) Value() interface{} {
-	// TODO
-	return nil
-}
-
+// RepresentationFromBuffer returns an appropriate representation of the underlying bytestream according to VR
 func RepresentationFromBuffer(buffer *bytes.Buffer, VR string, LittleEndian bool) interface{} {
 	switch VR {
 	case "UI", "SH", "UT", "ST", "PN", "OW", "LT", "IS", "DS", "CS", "AS", "AE", "LO":
@@ -100,21 +95,47 @@ func RepresentationFromBuffer(buffer *bytes.Buffer, VR string, LittleEndian bool
 			return binary.LittleEndian.Uint16(buffer.Bytes())
 		}
 		return binary.BigEndian.Uint16(buffer.Bytes())
-	case "SQ":
-		return "asd"
 	default:
 		return buffer.Bytes()
 	}
 }
 
-// Value returns an appropriate representation of the underlying bytestream according to VR
+// Describe returns a string array of human-readable element description
+func (e Element) Describe() []string {
+	var description []string
+
+	if len(e.Items) > 0 {
+		description = append(description, fmt.Sprintf("[%s] %s %s:", e.VR, e.Tag, e.Name))
+		for _, item := range e.Items {
+			for _, e := range item.Elements {
+				description = append(description, fmt.Sprintf("     - %s [%s] %v", e.Tag, e.VR, e.Value()))
+			}
+
+			for _, b := range item.UnknownSections {
+				description = append(description, fmt.Sprintf("     - (%d bytes) (not parsed)", len(b)))
+			}
+		}
+	} else {
+		if e.ValueLength <= 256 {
+			description = append(description, fmt.Sprintf("[%s] %s %s: %v", e.VR, e.Tag, e.Name, e.Value()))
+		} else {
+			description = append(description, fmt.Sprintf("[%s] %s %s: (%d bytes)", e.VR, e.Tag, e.Name, e.ValueLength))
+		}
+	}
+
+	if !e.CheckConformance() {
+		description[0] = fmt.Sprintf("!! %s", description[0])
+	}
+	return description
+}
+
+// Value returns an abstraction layer to the underlying bytestream according to VR
 func (e Element) Value() interface{} {
-	if e.value == nil {
+	if e.value == nil || e.ValueLength == 0 { // check both to be sure
 		if len(e.Items) > 0 {
 			return e.Items
-		} else {
-			return nil // neither value nor items set -- contents are empty
 		}
+		return nil // neither value nor items set -- contents are empty
 	}
 	return RepresentationFromBuffer(e.value, e.VR, e.LittleEndian)
 }
