@@ -10,14 +10,12 @@ import (
 )
 
 type DicomFile struct {
-	filepath       string
-	Reader         DicomFileReader
+	FilePath       string
+	ElementReader  ElementReader
 	Preamble       [128]byte
 	TotalMetaBytes int64
 	Elements       map[uint32]Element
 }
-
-// Note for the morning: how to represent elements inside a dicomfile? should elements in sequences be unique? should they be listed at the top level?
 
 type DicomFileChannel struct {
 	DicomFile DicomFile
@@ -82,19 +80,40 @@ func (a ByTag) Less(i, j int) bool { return a[i].Tag < a[j].Tag }
 
 // RepresentationFromBuffer returns an appropriate representation of the underlying bytestream according to VR
 func RepresentationFromBuffer(buffer *bytes.Buffer, VR string, LittleEndian bool) interface{} {
-	switch VR {
-	case "UI", "SH", "UT", "ST", "PN", "OW", "LT", "IS", "DS", "CS", "AS", "AE", "LO":
+	switch VR { // string
+	case "UI", "SH", "UT", "ST", "PN", "LT", "IS", "DS", "CS", "AS", "AE", "LO", "TM", "DA", "DT":
 		return string(buffer.Bytes())
-	case "UL":
+	case "FL": // float
 		if LittleEndian {
-			return binary.LittleEndian.Uint32(buffer.Bytes())
+			return float32(binary.LittleEndian.Uint32(buffer.Bytes()))
 		}
-		return binary.BigEndian.Uint32(buffer.Bytes())
-	case "US":
+		return float32(binary.BigEndian.Uint32(buffer.Bytes()))
+	case "FD": // double
+		if LittleEndian {
+			return float64(binary.LittleEndian.Uint64(buffer.Bytes()))
+		}
+		return float64(binary.BigEndian.Uint64(buffer.Bytes()))
+	case "SS": // short
+		if LittleEndian {
+			return int32(binary.LittleEndian.Uint32(buffer.Bytes()))
+		}
+		return int32(binary.BigEndian.Uint32(buffer.Bytes()))
+	case "SL": // long
+		if LittleEndian {
+			return int64(binary.LittleEndian.Uint64(buffer.Bytes()))
+		}
+		return int64(binary.BigEndian.Uint64(buffer.Bytes()))
+	case "US": // ushort
 		if LittleEndian {
 			return binary.LittleEndian.Uint16(buffer.Bytes())
 		}
 		return binary.BigEndian.Uint16(buffer.Bytes())
+	case "UL": // ulong
+		if LittleEndian {
+			return binary.LittleEndian.Uint32(buffer.Bytes())
+		}
+		return binary.BigEndian.Uint32(buffer.Bytes())
+
 	default:
 		return buffer.Bytes()
 	}

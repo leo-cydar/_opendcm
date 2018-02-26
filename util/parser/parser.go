@@ -71,7 +71,7 @@ func main() {
 			if dcm.Error != nil {
 				switch dcm.Error.(type) {
 				case core.NotADicomFile:
-					log.Printf("skipped %s (not a dicom file)", dcm.DicomFile.Reader.FilePath)
+					log.Printf("skipped %s (not a dicom file)", dcm.DicomFile.FilePath)
 				default:
 					log.Printf("DICOM parsing error: %v", dcm.Error)
 				}
