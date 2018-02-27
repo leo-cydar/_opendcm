@@ -11,7 +11,7 @@ import (
 
 type DicomFile struct {
 	FilePath       string
-	ElementReader  ElementReader
+	elementStream  ElementStream
 	Preamble       [128]byte
 	TotalMetaBytes int64
 	Elements       map[uint32]Element
@@ -113,7 +113,8 @@ func RepresentationFromBuffer(buffer *bytes.Buffer, VR string, LittleEndian bool
 			return binary.LittleEndian.Uint32(buffer.Bytes())
 		}
 		return binary.BigEndian.Uint32(buffer.Bytes())
-
+	// TODO: OW and OF require byteswapping too, but am unable to find sample datasets to validate method.
+	// Other libraries seem to not byteswap, and instead defer to consumer.
 	default:
 		return buffer.Bytes()
 	}

@@ -69,11 +69,12 @@ func main() {
 		for _, v := range channels {
 			dcm := <-v
 			if dcm.Error != nil {
-				switch dcm.Error.(type) {
-				case core.NotADicomFile:
-					log.Printf("skipped %s (not a dicom file)", dcm.DicomFile.FilePath)
-				default:
-					log.Printf("DICOM parsing error: %v", dcm.Error)
+				log.Printf("%v", dcm.Error)
+			} else {
+				for _, e := range dcm.DicomFile.Elements {
+					if e.VR == "OW" {
+						log.Printf("%s: OW: %s", dcm.DicomFile.FilePath, e.Tag)
+					}
 				}
 			}
 		}

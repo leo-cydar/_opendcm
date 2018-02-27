@@ -2,7 +2,6 @@ package core
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/b71729/opendcm/dictionary"
 )
@@ -20,7 +19,6 @@ func (ts *TransferSyntax) SetFromUID(uidstr string) error {
 	}
 	ts.UIDEntry = uidptr
 	ts.Encoding = GetEncodingForTransferSyntax(*ts)
-	log.Printf("TransferSyntax: %s (%s)", ts.UIDEntry.NameHuman, ts.Encoding)
 	return nil
 }
 
