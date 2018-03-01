@@ -71,10 +71,9 @@ func main() {
 			if dcm.Error != nil {
 				log.Printf("%v", dcm.Error)
 			} else {
-				for _, e := range dcm.DicomFile.Elements {
-					if e.VR == "OW" {
-						log.Printf("%s: OW: %s", dcm.DicomFile.FilePath, e.Tag)
-					}
+				e, found := dcm.DicomFile.GetElement(0x00080005)
+				if found {
+					log.Printf("File %s has hncoding: %s", dcm.DicomFile.FilePath, e.Value())
 				}
 			}
 		}

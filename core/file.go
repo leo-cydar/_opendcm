@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"strings"
 )
 
 func check(e error) {
@@ -104,14 +105,14 @@ func checkTransferSyntaxSupport(tsuid string) bool {
 // ElementStream provides an abstraction layer around a `*bytes.Reader` to facilitate easier parsing.
 type ElementStream struct {
 	reader         *bytes.Reader
-	Position       int64
 	TransferSyntax TransferSyntax
+	CharacterSet   *CharacterSet
 }
 
-// getElement yields an `Element` from the active stream, and an `error` if something went wrong.
+// GetElement yields an `Element` from the active stream, and an `error` if something went wrong.
 func (elementStream *ElementStream) GetElement() (Element, error) {
 	element := Element{}
-	element.LittleEndian = elementStream.TransferSyntax.Encoding.LittleEndian
+	element.sourceElementStream = elementStream
 	lower, err := elementStream.getUint16()
 	if err != nil {
 		return element, fmt.Errorf("GetElement: %v", err)
@@ -192,7 +193,6 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 		}
 		element.value = bytes.NewBuffer(valuebuf)
 	}
-
 	return element, nil
 }
 
@@ -387,9 +387,10 @@ func (elementStream *ElementStream) getBytes(num uint) ([]byte, error) {
 
 // NewElementStream sets up a new `ElementStream`
 func NewElementStream(source []byte, transferSyntaxUID string) (ElementStream, error) {
-	stream := ElementStream{Position: 0, TransferSyntax: TransferSyntax{}}
+	stream := ElementStream{TransferSyntax: TransferSyntax{}}
 	stream.TransferSyntax.SetFromUID(transferSyntaxUID)
 	stream.TransferSyntax.Encoding = GetEncodingForTransferSyntax(stream.TransferSyntax)
+	stream.CharacterSet = CharacterSetMap["Default"]
 	stream.reader = bytes.NewReader(source)
 	return stream, nil
 }
@@ -467,7 +468,7 @@ func (df *DicomFile) crawlMeta() error {
 
 	metaLengthElement, err := df.elementStream.GetElement()
 	if err != nil {
-		fmt.Errorf("crawlMeta: %v", err)
+		return fmt.Errorf("crawlMeta: %v", err)
 	}
 	df.Elements[uint32(metaLengthElement.Tag)] = metaLengthElement
 	df.TotalMetaBytes = df.elementStream.getPosition() + int64(metaLengthElement.Value().(uint32))
@@ -519,6 +520,13 @@ func (df *DicomFile) crawlElements() error {
 			return fmt.Errorf("crawlElements: %v", err)
 		}
 		df.Elements[uint32(element.Tag)] = element
+
+		switch element.Tag {
+		case 0x00080005:
+			s := element.Value().(string)
+			s = strings.Replace(s, "\\", "", -1) // TODO: This is a hack. We should parse the dividers properly.
+			df.elementStream.CharacterSet = CharacterSetMap[s]
+		}
 
 		if df.elementStream.getPosition()+df.TotalMetaBytes >= fileSize {
 			break
