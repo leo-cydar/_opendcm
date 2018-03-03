@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -13,13 +14,20 @@ import (
 	"github.com/b71729/opendcm/dictionary"
 )
 
-func check(e error) {
-	if e != nil {
-		panic(e)
+// TermError provides ansi escape codes for a red "!!" section.
+const TermError = "\x1b[31;1m  !!\x1b[0m"
+
+// TermError provides ansi escape codes for a red "!!" section.
+const TermWarn = "\x1b[33;1m  !!\x1b[0m"
+
+func check(err error) {
+	if err != nil {
+		fmt.Printf("%s %v\n", TermError, err)
+		os.Exit(1)
 	}
 }
 
-var stringRE, tagRE, uidStartRE *regexp.Regexp
+var stringRE, tagRE, uidStartRE, acceptibleVM *regexp.Regexp
 
 func eachToken(data string, cb func(token string)) {
 	decoder := xml.NewDecoder(strings.NewReader(data))
@@ -70,8 +78,18 @@ func ParseDataElements(data string) (elements []dictionary.DictEntry) {
 				elements[index].VR = token[:2]
 			default:
 				elements[index].VR = "UN"
-				log.Printf("Note: VR for Data Element %s is '%s'. Using 'UN' instead.", elements[index].Tag, token)
+				log.Printf("%s Warning: VR for Data Element %s is '%s'. Using 'UN' instead.", TermWarn, elements[index].Tag, token)
 			}
+		case 5:
+			orIndex := strings.Index(token, " or")
+			if orIndex > -1 {
+				token = token[:orIndex]
+			}
+			if !acceptibleVM.Match([]byte(token)) {
+				log.Printf("%s Warning: VM for Data Element %s is '%s'. Using 'n' instead.", TermWarn, elements[index].Tag, token)
+				token = "n"
+			}
+			elements[index].VM = token
 		case 6:
 			if token == "RET" {
 				elements[index].Retired = true
@@ -120,21 +138,25 @@ func tableBodyPosition(data string) (posStart int, posEnd int, err error) {
 // Generates a DICOM data dictionary file from XML
 func main() {
 	if len(os.Args) != 2 {
-		log.Fatalln("Usage: gendatadict XMLFILEPATH")
+		fmt.Printf("%s Usage: %s dictfromNEMA.xml\n", TermError, filepath.Base(os.Args[0]))
+		return
 	}
-	xmlfile := os.Args[1]
-	f, err := os.Open(xmlfile)
+	stat, err := os.Stat(os.Args[1])
 	check(err)
-	stat, err := f.Stat()
+
+	f, err := os.Open(os.Args[1])
 	check(err)
+	defer f.Close()
+
 	buf := make([]byte, stat.Size())
 	_, err = f.Read(buf)
 	check(err)
 
 	data := string(buf)
-	tagRE, _ = regexp.Compile("\\([0-9A-Fa-f]{4},[0-9A-Fa-f]{4}\\)")
-	uidStartRE, _ = regexp.Compile("([0-9]+\\.[0-9]+\\.[0-9]+)")
-	stringRE, _ = regexp.Compile("([a-zA-Z0-9])")
+	tagRE = regexp.MustCompile("\\([0-9A-Fa-f]{4},[0-9A-Fa-f]{4}\\)")
+	uidStartRE = regexp.MustCompile("([0-9]+\\.[0-9]+\\.[0-9]+)")
+	stringRE = regexp.MustCompile("([a-zA-Z0-9])")
+	acceptibleVM = regexp.MustCompile("^([0-9-n]+)$")
 
 	// data elements
 	posStart, posEnd, err := tableBodyPosition(data)
@@ -183,6 +205,7 @@ type DictEntry struct {
 	NameHuman string
 	Name      string
 	VR        string
+	VM        string
 	Retired   bool
 }
 
@@ -207,12 +230,12 @@ var DicomDictionary = map[uint32]*DictEntry{
 
 	outCode += "    // Directory Structure Elements\n"
 	for _, v := range dirStructElements {
-		outCode += fmt.Sprintf(`    0x%08X: &DictEntry{Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", Retired: %v},`, uint32(v.Tag), uint32(v.Tag), v.Name, v.NameHuman, v.VR, v.Retired) + "\n"
+		outCode += fmt.Sprintf(`    0x%08X: &DictEntry{Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", VM: "%s", Retired: %v},`, uint32(v.Tag), uint32(v.Tag), v.Name, v.NameHuman, v.VR, v.VM, v.Retired) + "\n"
 	}
 
 	outCode += "    // Data Elements\n"
 	for _, v := range dataElements {
-		outCode += fmt.Sprintf(`    0x%08X: &DictEntry{Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", Retired: %v},`, uint32(v.Tag), uint32(v.Tag), v.Name, v.NameHuman, v.VR, v.Retired) + "\n"
+		outCode += fmt.Sprintf(`    0x%08X: &DictEntry{Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", VM: "%s", Retired: %v},`, uint32(v.Tag), uint32(v.Tag), v.Name, v.NameHuman, v.VR, v.VM, v.Retired) + "\n"
 	}
 
 	outCode += `}
