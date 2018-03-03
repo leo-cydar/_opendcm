@@ -27,24 +27,25 @@ func main() {
 	isDir := stat.IsDir()
 	if !isDir {
 		dcm, err := core.ParseDicom(os.Args[1])
-		var elements []core.Element
-		for _, v := range dcm.Elements {
-			elements = append(elements, v)
-		}
-		sort.Sort(core.ByTag(elements))
-		for _, element := range elements {
-			description := element.Describe()
-			for _, line := range description {
-				log.Println(line)
-			}
-		}
 		if err != nil {
-			log.Fatalf("DICOM parsing error: %v", err)
+			log.Printf("%v", err)
+		} else {
+			var elements []core.Element
+			for _, v := range dcm.Elements {
+				elements = append(elements, v)
+			}
+			sort.Sort(core.ByTag(elements))
+			for _, element := range elements {
+				description := element.Describe()
+				for _, line := range description {
+					log.Println(line)
+				}
+			}
 		}
 	} else {
 		// parse directory
 		var channels []chan core.DicomFileChannel
-		guard := make(chan struct{}, 128) // TODO: Handle too many open files
+		guard := make(chan struct{}, 64) // TODO: Handle too many open files
 		var files []string
 
 		filepath.Walk(os.Args[1], func(path string, info os.FileInfo, err error) error {
@@ -73,7 +74,7 @@ func main() {
 			} else {
 				e, found := dcm.DicomFile.GetElement(0x00080005)
 				if found {
-					log.Printf("File %s has hncoding: %s", dcm.DicomFile.FilePath, e.Value())
+					log.Printf("File %s has CharSet: %s", dcm.DicomFile.FilePath, e.Value())
 				}
 			}
 		}

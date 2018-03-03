@@ -320,7 +320,7 @@ func (elementStream *ElementStream) skipBytes(num int64) error {
 		return fmt.Errorf("skipBytes(%d): nseek = %d", num, nseek)
 	}
 	if err != nil {
-		return fmt.Errorf("skipBytes(%d): %v", err)
+		return fmt.Errorf("skipBytes(%d): %v", num, err)
 	}
 	return nil
 }
