@@ -1,4 +1,5 @@
-package core
+// Package file implements functionality to parse dicom files
+package file
 
 import (
 	"fmt"
@@ -6,11 +7,13 @@ import (
 	"github.com/b71729/opendcm/dictionary"
 )
 
+// TransferSyntax provides a link between dictionary `UIDEntry` and encoding (byteorder, implicit/explicit VR)
 type TransferSyntax struct {
 	UIDEntry *dictionary.UIDEntry
 	Encoding *Encoding
 }
 
+// SetFromUID sets the `TransferSyntax` UIDEntry and Encoding from the static dictionary
 // https://nathanleclaire.com/blog/2014/08/09/dont-get-bitten-by-pointer-vs-non-pointer-method-receivers-in-golang/
 func (ts *TransferSyntax) SetFromUID(uidstr string) error {
 	uidptr, err := LookupUID(uidstr)

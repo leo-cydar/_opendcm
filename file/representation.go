@@ -1,4 +1,5 @@
-package core
+// Package file implements functionality to parse dicom files
+package file
 
 import (
 	"bytes"
@@ -16,17 +17,13 @@ import (
 	"golang.org/x/text/encoding/unicode"
 )
 
+// DicomFile provides a link between components that make up a parsed DICOM file
 type DicomFile struct {
 	FilePath       string
 	elementStream  ElementStream
 	Preamble       [128]byte
 	TotalMetaBytes int64
 	Elements       map[uint32]Element
-}
-
-type DicomFileChannel struct {
-	DicomFile DicomFile
-	Error     error
 }
 
 // GetElement returns an Element inside the DicomFile according to `tag`.
@@ -45,6 +42,7 @@ type Element struct {
 	Items               []Item
 }
 
+// CharacterSet provides a link between character encoding, description, and decode + encode functions.
 type CharacterSet struct {
 	Name        string
 	Description string
@@ -53,6 +51,7 @@ type CharacterSet struct {
 	encoder     *encoding.Encoder
 }
 
+// CharacterSetMap provides a mapping between character set name, and character set characteristics.
 var CharacterSetMap = map[string]*CharacterSet{
 	"Default":         &CharacterSet{Name: "Default", Description: "Default Character Repertoire", Encoding: unicode.UTF8},
 	"ISO_IR 13":       &CharacterSet{Name: "ISO_IR 13", Description: "Japanese", Encoding: japanese.ShiftJIS},
@@ -118,12 +117,12 @@ func IsCharacterStringVR(vr string) bool {
 	}
 }
 
-func SplitCharacterStringVM(buffer []byte) [][]byte {
+func splitCharacterStringVM(buffer []byte) [][]byte {
 	split := bytes.Split(buffer, []byte(`\`))
 	return split
 }
 
-func SplitBinaryVM(buffer []byte, nBytesEach int) [][]byte {
+func splitBinaryVM(buffer []byte, nBytesEach int) [][]byte {
 	out := make([][]byte, 0)
 	pos := 0
 	for len(buffer) < pos+nBytesEach {
@@ -277,43 +276,43 @@ func (e Element) Value() interface{} {
 		switch e.VR {
 		case "AE", "AS", "CS", "DA", "DS", "DT", "IS", "LO", "PN", "SH", "TM", "UI": // LT, ST, UT do not support multiVM
 			var outBuf []string
-			for _, v := range SplitCharacterStringVM(valueBytes) {
+			for _, v := range splitCharacterStringVM(valueBytes) {
 				outBuf = append(outBuf, decodeContents(v, &e).(string))
 			}
 			return outBuf
 		case "FL":
 			var outBuf []float32
-			for _, v := range SplitBinaryVM(valueBytes, 4) {
+			for _, v := range splitBinaryVM(valueBytes, 4) {
 				outBuf = append(outBuf, decodeContents(v, &e).(float32))
 			}
 			return outBuf
 		case "FD":
 			var outBuf []float64
-			for _, v := range SplitBinaryVM(valueBytes, 8) {
+			for _, v := range splitBinaryVM(valueBytes, 8) {
 				outBuf = append(outBuf, decodeContents(v, &e).(float64))
 			}
 			return outBuf
 		case "SS":
 			var outBuf []int16
-			for _, v := range SplitBinaryVM(valueBytes, 2) {
+			for _, v := range splitBinaryVM(valueBytes, 2) {
 				outBuf = append(outBuf, decodeContents(v, &e).(int16))
 			}
 			return outBuf
 		case "SL":
 			var outBuf []int32
-			for _, v := range SplitBinaryVM(valueBytes, 4) {
+			for _, v := range splitBinaryVM(valueBytes, 4) {
 				outBuf = append(outBuf, decodeContents(v, &e).(int32))
 			}
 			return outBuf
 		case "US":
 			var outBuf []uint16
-			for _, v := range SplitBinaryVM(valueBytes, 2) {
+			for _, v := range splitBinaryVM(valueBytes, 2) {
 				outBuf = append(outBuf, decodeContents(v, &e).(uint16))
 			}
 			return outBuf
 		case "UL":
 			var outBuf []uint32
-			for _, v := range SplitBinaryVM(valueBytes, 4) {
+			for _, v := range splitBinaryVM(valueBytes, 4) {
 				outBuf = append(outBuf, decodeContents(v, &e).(uint32))
 			}
 			return outBuf
@@ -322,6 +321,7 @@ func (e Element) Value() interface{} {
 	return decodeContents(valueBytes, &e)
 }
 
+// ValueBytes returns *all* bytes contained within an element's value, including sequences
 func (e Element) ValueBytes() []byte {
 	var buffer []byte
 	if e.value != nil && e.ValueLength > 0 {

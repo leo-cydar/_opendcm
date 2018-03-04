@@ -1,3 +1,4 @@
+// Package main implements a dicom parser CLI
 package main
 
 import (
@@ -7,14 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/b71729/opendcm/core"
+	"github.com/b71729/opendcm/file"
 )
-
-func check(e error) {
-	if e != nil {
-		panic(e)
-	}
-}
 
 func main() {
 	if len(os.Args) != 2 {
@@ -26,15 +21,15 @@ func main() {
 	}
 	isDir := stat.IsDir()
 	if !isDir {
-		dcm, err := core.ParseDicom(os.Args[1])
+		dcm, err := file.ParseDicom(os.Args[1])
 		if err != nil {
 			log.Printf("%v", err)
 		} else {
-			var elements []core.Element
+			var elements []file.Element
 			for _, v := range dcm.Elements {
 				elements = append(elements, v)
 			}
-			sort.Sort(core.ByTag(elements))
+			sort.Sort(file.ByTag(elements))
 			for _, element := range elements {
 				description := element.Describe()
 				for _, line := range description {
@@ -44,7 +39,8 @@ func main() {
 		}
 	} else {
 		// parse directory
-		var channels []chan core.DicomFileChannel
+		var dicomchannels []chan file.DicomFile
+		var errorchannels []chan error
 		guard := make(chan struct{}, 64) // TODO: Handle too many open files
 		var files []string
 
@@ -62,19 +58,20 @@ func main() {
 		// now goroutine each file
 		for _, path := range files {
 			guard <- struct{}{} // would block if guard channel is already filled
-			c := make(chan core.DicomFileChannel)
-			go core.ParseDicomChannel(path, c, guard)
-			channels = append(channels, c)
+			dicomchannel := make(chan file.DicomFile)
+			errorchannel := make(chan error)
+			go file.ParseDicomChannel(path, dicomchannel, errorchannel, guard)
+			dicomchannels = append(dicomchannels, dicomchannel)
+			errorchannels = append(errorchannels, errorchannel)
 		}
-
-		for _, v := range channels {
-			dcm := <-v
-			if dcm.Error != nil {
-				log.Printf("%v", dcm.Error)
-			} else {
-				e, found := dcm.DicomFile.GetElement(0x00080005)
+		for i := 0; i < len(dicomchannels); i++ {
+			select {
+			case err := <-errorchannels[i]:
+				log.Printf("%v", err)
+			case dcm := <-dicomchannels[i]:
+				e, found := dcm.GetElement(0x00080005)
 				if found {
-					log.Printf("File %s has CharSet: %s", dcm.DicomFile.FilePath, e.Value())
+					log.Printf("File %s has CharSet: %s", dcm.FilePath, e.Value())
 				}
 			}
 		}

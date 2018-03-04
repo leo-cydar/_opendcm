@@ -1,3 +1,4 @@
+// Package main provides a utility to generate data dictionary
 package main
 
 import (
@@ -17,7 +18,7 @@ import (
 // TermError provides ansi escape codes for a red "!!" section.
 const TermError = "\x1b[31;1m  !!\x1b[0m"
 
-// TermError provides ansi escape codes for a red "!!" section.
+// TermWarn provides ansi escape codes for a red "!!" section.
 const TermWarn = "\x1b[33;1m  !!\x1b[0m"
 
 func check(err error) {
@@ -126,11 +127,11 @@ func ParseUIDs(data string) (uids []dictionary.UIDEntry) {
 func tableBodyPosition(data string) (posStart int, posEnd int, err error) {
 	posStart = strings.Index(data, "<tbody>")
 	if posStart <= 0 {
-		return 0, 0, errors.New("Could not find <tbody>")
+		return 0, 0, errors.New("could not find <tbody>")
 	}
 	posEnd = strings.Index(data, "</tbody>")
 	if posEnd <= 0 {
-		return posStart, 0, errors.New("Could not find </tbody>")
+		return posStart, 0, errors.New("could not find </tbody>")
 	}
 	return posStart, posEnd, nil
 }

@@ -1,20 +1,15 @@
-package core
+// Package file implements functionality to parse dicom files
+package file
 
 import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 )
-
-func check(e error) {
-	if e != nil {
-		panic(e)
-	}
-}
 
 // VRSpecification represents a specification for VR, according to NEMA specs.
 type VRSpecification struct {
@@ -22,70 +17,6 @@ type VRSpecification struct {
 	MaximumLengthBytes uint32
 	FixedLength        bool
 	CharsetRe          *regexp.Regexp
-}
-
-var defaultCharsetRe = regexp.MustCompile("^[[:ascii:]]+$")
-var defaultCharsetReadbleOnlyRe = regexp.MustCompile("^([\x00-\x09|\x13|\x16-\x1A|\x1C-\x5B]|[\x5D-\x7F])+$")
-var ageStringRe = regexp.MustCompile("^[0-9DWMY]+$")
-var codeStringRe = regexp.MustCompile(`^[A-Z0-9_ \\]+$`)
-var dateRe = regexp.MustCompile("^[0-9-]+$")
-var decimalStringRe = regexp.MustCompile(`^[0-9+-Ee\.\\]+$`)
-var dateTimeRe = regexp.MustCompile("^[0-9+-\\.]+$")
-var integerStringRe = regexp.MustCompile("^[0-9+-]+$")
-var patientNameRe = regexp.MustCompile("^([\x00-\x09|\x13|\x16-\x5B]|[\x5D-\x7F])+$")
-var timeRe = regexp.MustCompile("^[0-9-\\. ]+$")
-var uniqueIdentifierRe = regexp.MustCompile("^[0-9\\.]+$")
-
-// VRConformanceMap provides a mapping between `VR` (string) and `VRSpecification` (struct)
-var VRConformanceMap = map[string]*VRSpecification{
-	"AE": &VRSpecification{VR: "AE", MaximumLengthBytes: 16, CharsetRe: defaultCharsetReadbleOnlyRe},
-	"AS": &VRSpecification{VR: "AS", MaximumLengthBytes: 4, CharsetRe: ageStringRe, FixedLength: true},
-	"AT": &VRSpecification{VR: "AT", MaximumLengthBytes: 4, CharsetRe: nil, FixedLength: true},
-	"CS": &VRSpecification{VR: "CS", MaximumLengthBytes: 0xFFFFFFFF, CharsetRe: codeStringRe},
-	"DA": &VRSpecification{VR: "DA", MaximumLengthBytes: 18, CharsetRe: dateRe},
-	"DS": &VRSpecification{VR: "DS", MaximumLengthBytes: 0xFFFFFFFF, CharsetRe: decimalStringRe},
-	"DT": &VRSpecification{VR: "DT", MaximumLengthBytes: 54, CharsetRe: dateTimeRe},
-	"FL": &VRSpecification{VR: "FL", MaximumLengthBytes: 4, CharsetRe: nil, FixedLength: true},
-	"FD": &VRSpecification{VR: "FD", MaximumLengthBytes: 8, CharsetRe: nil, FixedLength: true},
-	"IS": &VRSpecification{VR: "IS", MaximumLengthBytes: 12, CharsetRe: integerStringRe},
-	"LO": &VRSpecification{VR: "LO", MaximumLengthBytes: 64, CharsetRe: defaultCharsetRe},
-	"LT": &VRSpecification{VR: "LT", MaximumLengthBytes: 10240, CharsetRe: defaultCharsetRe},
-	"OB": &VRSpecification{VR: "OB", MaximumLengthBytes: 0xFFFFFFFF},
-	"OD": &VRSpecification{VR: "OD", MaximumLengthBytes: 0xFFFFFFF8},
-	"OF": &VRSpecification{VR: "OF", MaximumLengthBytes: 0xFFFFFFFC},
-	"OW": &VRSpecification{VR: "OW", MaximumLengthBytes: 0xFFFFFFFF},
-	"PN": &VRSpecification{VR: "PN", MaximumLengthBytes: (64 * 5), CharsetRe: patientNameRe},
-	"SH": &VRSpecification{VR: "SH", MaximumLengthBytes: 16, CharsetRe: defaultCharsetRe}, // NOTE: ambiguity in spec
-	"SL": &VRSpecification{VR: "SL", MaximumLengthBytes: 4, FixedLength: true},
-	"SQ": &VRSpecification{VR: "SQ", MaximumLengthBytes: 0xFFFFFFFF},
-	"SS": &VRSpecification{VR: "SS", MaximumLengthBytes: 2, FixedLength: true},
-	"ST": &VRSpecification{VR: "ST", MaximumLengthBytes: 1024, CharsetRe: defaultCharsetRe},
-	"TM": &VRSpecification{VR: "TM", MaximumLengthBytes: 28, CharsetRe: timeRe},
-	"UI": &VRSpecification{VR: "UI", MaximumLengthBytes: 64, CharsetRe: uniqueIdentifierRe},
-	"UL": &VRSpecification{VR: "UL", MaximumLengthBytes: 4, FixedLength: true},
-	"UN": &VRSpecification{VR: "UN", MaximumLengthBytes: 0xFFFFFFFF},
-	"US": &VRSpecification{VR: "US", MaximumLengthBytes: 2, FixedLength: true},
-	"UT": &VRSpecification{VR: "UT", MaximumLengthBytes: 0xFFFFFFFE, CharsetRe: defaultCharsetRe},
-}
-
-// CheckConformance checks whether the current `Element` conforms with NEMA specs.
-func (element Element) CheckConformance() bool {
-	specification, found := VRConformanceMap[element.VR]
-	if !found {
-		log.Fatalf("Could not find conformance for VR %s", element.VR)
-	}
-	if specification.CharsetRe == nil || element.ValueLength == 0 || specification.CharsetRe.Match(element.value.Bytes()) {
-		if specification.FixedLength && element.ValueLength == specification.MaximumLengthBytes {
-			return true
-		}
-		if specification.MaximumLengthBytes != 0xFFFFFF {
-			if element.ValueLength <= specification.MaximumLengthBytes {
-				return true
-			}
-		}
-	}
-
-	return false
 }
 
 func checkTransferSyntaxSupport(tsuid string) bool {
@@ -114,11 +45,11 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 	element.sourceElementStream = elementStream
 	lower, err := elementStream.getUint16()
 	if err != nil {
-		return element, fmt.Errorf("GetElement: %v", err)
+		return element, fmt.Errorf(" GetElement: %v", err)
 	}
 	upper, err := elementStream.getUint16()
 	if err != nil {
-		return element, fmt.Errorf("GetElement: %v", err)
+		return element, fmt.Errorf(" GetElement: %v", err)
 	}
 	tagUint32 := (uint32(lower) << 16) | uint32(upper)
 	tag, _ := LookupTag(tagUint32)
@@ -127,29 +58,29 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 		if element.VR == "UN" { // but only if we dont already have VR from dictionary (more reliable)
 			VRbytes, err := elementStream.getBytes(2)
 			if err != nil {
-				return element, fmt.Errorf("GetElement %s: %v", tag.Tag, err)
+				return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
 			}
 			element.VR = string(VRbytes)
 		} else { // else just skip two bytes as we are using dictionary value
 			err := elementStream.skipBytes(2)
 			if err != nil {
-				return element, fmt.Errorf("GetElement %s: %v", tag.Tag, err)
+				return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
 			}
 		}
 		if element.VR == "OB" || element.VR == "OW" || element.VR == "SQ" || element.VR == "UN" || element.VR == "UT" {
 			// these VRs, in explicit VR mode, have two reserved bytes following VR definition
 			err := elementStream.skipBytes(2)
 			if err != nil {
-				return element, fmt.Errorf("GetElement %s: %v", tag.Tag, err)
+				return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
 			}
 			element.ValueLength, err = elementStream.getUint32()
 			if err != nil {
-				return element, fmt.Errorf("GetElement %s: %v", tag.Tag, err)
+				return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
 			}
 		} else {
 			length, err := elementStream.getUint16()
 			if err != nil {
-				return element, fmt.Errorf("GetElement %s: %v", tag.Tag, err)
+				return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
 			}
 			element.ValueLength = uint32(length)
 		}
@@ -157,14 +88,14 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 		// implicit VR -- all VR length definitions are 32 bits
 		element.ValueLength, err = elementStream.getUint32()
 		if err != nil {
-			return element, fmt.Errorf("GetElement %s: %v", tag.Tag, err)
+			return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
 		}
 	}
 	if element.ValueLength == 0xFFFFFFFF {
 		var parseElements = (element.VR == "SQ")
 		items, err := elementStream.getSequence(parseElements)
 		if err != nil {
-			return element, fmt.Errorf("GetElement %s: %v", tag.Tag, err)
+			return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
 		}
 		element.Items = items
 	} else {
@@ -174,7 +105,7 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 		if element.ValueLength > 0 {
 			err = elementStream.read(valuebuf)
 			if err != nil {
-				return element, fmt.Errorf("GetElement %s: %v", tag.Tag, err)
+				return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
 			}
 			padchars := []byte{0x00, 0x20}
 			switch element.VR {
@@ -529,27 +460,35 @@ func (df *DicomFile) crawlElements() error {
 			break
 		}
 	}
-
 	return nil
 }
 
+// ParseDicom takes a relative/absolute path to a dicom file and returns a parsed `DicomFile` [+ error]
 func ParseDicom(path string) (DicomFile, error) {
 	dcm := DicomFile{}
 	dcm.FilePath = path
 	dcm.Elements = make(map[uint32]Element)
 
 	if err := dcm.crawlMeta(); err != nil {
-		return dcm, fmt.Errorf("ParseDicom: %v", err)
+		return dcm, fmt.Errorf(" ParseDicom(%s): %v", filepath.Base(path), err)
 	}
 	if err := dcm.crawlElements(); err != nil {
-		return dcm, fmt.Errorf("ParseDicom: %v", err)
+		return dcm, fmt.Errorf(" ParseDicom(%s): %v", filepath.Base(path), err)
 	}
 
 	return dcm, nil
 }
 
-func ParseDicomChannel(path string, c chan DicomFileChannel, s chan struct{}) {
+// ParseDicomChannel wraps `ParseDicom` in a channel for parsing in a goroutine
+func ParseDicomChannel(path string, dicomchannel chan DicomFile, errorchannel chan error, guard chan struct{}) {
+	if guard != nil {
+		<-guard
+	}
 	dcm, err := ParseDicom(path)
-	<-s
-	c <- DicomFileChannel{dcm, err}
+
+	if err != nil {
+		errorchannel <- err
+		return
+	}
+	dicomchannel <- dcm
 }
