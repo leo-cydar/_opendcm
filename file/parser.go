@@ -60,6 +60,7 @@ func checkTransferSyntaxSupport(tsuid string) bool {
 // ElementStream provides an abstraction layer around a `*bytes.Reader` to facilitate easier parsing.
 type ElementStream struct {
 	reader         *bytes.Reader
+	fileOffset     int64
 	TransferSyntax TransferSyntax
 	CharacterSet   *CharacterSet
 }
@@ -67,6 +68,7 @@ type ElementStream struct {
 // GetElement yields an `Element` from the active stream, and an `error` if something went wrong.
 func (elementStream *ElementStream) GetElement() (Element, error) {
 	element := Element{}
+	element.FileOffsetStart = elementStream.getPosition() + elementStream.fileOffset
 	element.sourceElementStream = elementStream
 	lower, err := elementStream.getUint16()
 	if err != nil {
@@ -116,6 +118,10 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 			return element, &CorruptElement{fmt.Errorf("GetElement(): [%s] %v", tag.Tag, err)}
 		}
 	}
+	// issue #4: Parser allows for element value length to exceed file size
+	if int(element.ValueLength) > elementStream.reader.Len() {
+		return element, &CorruptElement{fmt.Errorf("GetElement(): value length (%d) exceeds buffer size (%d)", element.ValueLength, elementStream.reader.Len())}
+	}
 	if element.ValueLength == 0xFFFFFFFF {
 		var parseElements = (element.VR == "SQ")
 		items, err := elementStream.getSequence(parseElements)
@@ -150,6 +156,8 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 		}
 		element.value = bytes.NewBuffer(valuebuf)
 	}
+
+	element.ByteLengthTotal = (elementStream.getPosition() + elementStream.fileOffset) - element.FileOffsetStart
 	return element, nil
 }
 
@@ -330,6 +338,9 @@ func (elementStream *ElementStream) getUint32() (uint32, error) {
 }
 
 func (elementStream *ElementStream) getBytes(num uint) ([]byte, error) {
+	if int(num) > elementStream.reader.Len() {
+		return nil, &ElementStreamError{fmt.Errorf("getBytes(%d): would exceed buffer size (%d bytes)", num, elementStream.reader.Len())}
+	}
 	buf := make([]byte, num)
 	nread, err := elementStream.reader.Read(buf)
 	if uint(nread) != num {
@@ -342,12 +353,13 @@ func (elementStream *ElementStream) getBytes(num uint) ([]byte, error) {
 }
 
 // NewElementStream sets up a new `ElementStream`
-func NewElementStream(source []byte, transferSyntaxUID string) (ElementStream, error) {
+func NewElementStream(source []byte, transferSyntaxUID string, fileOffset int64) (ElementStream, error) {
 	stream := ElementStream{TransferSyntax: TransferSyntax{}}
 	stream.TransferSyntax.SetFromUID(transferSyntaxUID)
 	stream.TransferSyntax.Encoding = GetEncodingForTransferSyntax(stream.TransferSyntax)
 	stream.CharacterSet = CharacterSetMap["Default"]
 	stream.reader = bytes.NewReader(source)
+	stream.fileOffset = fileOffset
 	return stream, nil
 }
 
@@ -438,7 +450,7 @@ func (df *Dicom) crawlMeta() error {
 			return &CorruptDicom{fmt.Errorf("crawlMeta(): %v", err)}
 		}
 	}
-	df.elementStream, err = NewElementStream(bytes, "1.2.840.10008.1.2.1")
+	df.elementStream, err = NewElementStream(bytes, "1.2.840.10008.1.2.1", 0)
 	if err != nil {
 		return &CorruptDicom{fmt.Errorf("crawlMeta(): %v", err)}
 	}
@@ -493,13 +505,20 @@ func (df *Dicom) crawlElements() error {
 	tsElement, ok := df.GetElement(0x0020010)
 
 	if ok {
-		transfersyntaxuid = tsElement.Value().(string)
-		supported := checkTransferSyntaxSupport(transfersyntaxuid)
-		if !supported {
-			return &UnsupportedDicom{fmt.Errorf("unsupported transfer syntax: %s", transfersyntaxuid)}
+		val := tsElement.Value()
+		switch val.(type) {
+		case string:
+			transfersyntaxuid = val.(string)
+			supported := checkTransferSyntaxSupport(transfersyntaxuid)
+			if !supported {
+				return &UnsupportedDicom{fmt.Errorf("unsupported transfer syntax: %s", transfersyntaxuid)}
+			}
+		default:
+			return &CorruptDicom{fmt.Errorf("TransferSyntaxUID is corrupt")}
 		}
 	}
-	df.elementStream, err = NewElementStream(bytes, transfersyntaxuid)
+
+	df.elementStream, err = NewElementStream(bytes, transfersyntaxuid, df.TotalMetaBytes)
 	if err != nil {
 		return &CorruptDicom{fmt.Errorf("crawlElements(): %v", err)}
 	}
