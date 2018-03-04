@@ -15,4 +15,4 @@
 
 # DICOM data
 dicomdir/
-util/gendatadict/*.xml
+util/odcm-gend/*.xml

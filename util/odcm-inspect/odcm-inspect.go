@@ -1,4 +1,4 @@
-// Package main implements a dicom parser CLI
+// Package main implements a dicom inspector CLI
 package main
 
 import (
@@ -11,30 +11,47 @@ import (
 	"github.com/b71729/opendcm/file"
 )
 
+// TermRed provides ansi escape codes for a red section.
+func TermRed(s string) string {
+	return fmt.Sprintf("\x1b[31;1m%s\x1b[0m", s)
+}
+
+// TermYellow provides ansi escape codes for a yellow section.
+func TermYellow(s string) string {
+	return fmt.Sprintf("\x1b[33;1m%s\x1b[0m", s)
+}
+
+// TermGreen provides ansi escape codes for a green section.
+func TermGreen(s string) string {
+	return fmt.Sprintf("\x1b[92;1m%s\x1b[0m", s)
+}
+
 func main() {
-	if len(os.Args) != 2 {
-		log.Fatalf("Usage: parser FILE_OR_DIR")
+	if len(os.Args) != 2 || os.Args[1] == "-h" || os.Args[1] == "--help" {
+		fmt.Printf("  %s Usage: %s FILE_OR_DIR\n", TermRed("!!"), filepath.Base(os.Args[0]))
+		return
 	}
 	stat, err := os.Stat(os.Args[1])
 	if err != nil {
-		log.Fatalf("Failed to stat '%s': %v", os.Args[1], err)
+		fmt.Printf("  %s Failed to stat '%s': %v\n", TermRed("!!"), os.Args[1], err)
+		return
 	}
 	isDir := stat.IsDir()
 	if !isDir {
 		dcm, err := file.ParseDicom(os.Args[1])
 		if err != nil {
-			log.Printf("%v", err)
-		} else {
-			var elements []file.Element
-			for _, v := range dcm.Elements {
-				elements = append(elements, v)
-			}
-			sort.Sort(file.ByTag(elements))
-			for _, element := range elements {
-				description := element.Describe()
-				for _, line := range description {
-					log.Println(line)
-				}
+			fmt.Printf("  %s %v\n", TermRed("!!"), err)
+			return
+		}
+		var elements []file.Element
+		for _, v := range dcm.Elements {
+			elements = append(elements, v)
+		}
+		sort.Sort(file.ByTag(elements))
+		for _, element := range elements {
+			description := element.Describe()
+			for _, line := range description {
+				fmt.Printf("  %s %s\n", TermGreen("+"), line)
 			}
 		}
 	} else {
