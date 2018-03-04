@@ -11,6 +11,31 @@ import (
 	"regexp"
 )
 
+// UnsupportedDicom is an error representing that the `Dicom` is unsupported
+type UnsupportedDicom struct {
+	error
+}
+
+// NotADicom is an error representing that the input is not recognised as a valid dicom
+type NotADicom struct {
+	error
+}
+
+// CorruptDicom is an error representing that a `Dicom` is corrupt
+type CorruptDicom struct {
+	error
+}
+
+// CorruptElement is an error representing that an `Element` is corrupt
+type CorruptElement struct {
+	error
+}
+
+// ElementStreamError is an error representing that the `ElementStream` encountered a general problem
+type ElementStreamError struct {
+	error
+}
+
 // VRSpecification represents a specification for VR, according to NEMA specs.
 type VRSpecification struct {
 	VR                 string
@@ -45,11 +70,11 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 	element.sourceElementStream = elementStream
 	lower, err := elementStream.getUint16()
 	if err != nil {
-		return element, fmt.Errorf(" GetElement: %v", err)
+		return element, &CorruptElement{fmt.Errorf("GetElement(): %v", err)}
 	}
 	upper, err := elementStream.getUint16()
 	if err != nil {
-		return element, fmt.Errorf(" GetElement: %v", err)
+		return element, &CorruptElement{fmt.Errorf("GetElement(): %v", err)}
 	}
 	tagUint32 := (uint32(lower) << 16) | uint32(upper)
 	tag, _ := LookupTag(tagUint32)
@@ -58,29 +83,29 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 		if element.VR == "UN" { // but only if we dont already have VR from dictionary (more reliable)
 			VRbytes, err := elementStream.getBytes(2)
 			if err != nil {
-				return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
+				return element, &CorruptElement{fmt.Errorf("GetElement(): [%s] %v", tag.Tag, err)}
 			}
 			element.VR = string(VRbytes)
 		} else { // else just skip two bytes as we are using dictionary value
 			err := elementStream.skipBytes(2)
 			if err != nil {
-				return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
+				return element, &CorruptElement{fmt.Errorf("GetElement(): [%s] %v", tag.Tag, err)}
 			}
 		}
 		if element.VR == "OB" || element.VR == "OW" || element.VR == "SQ" || element.VR == "UN" || element.VR == "UT" {
 			// these VRs, in explicit VR mode, have two reserved bytes following VR definition
 			err := elementStream.skipBytes(2)
 			if err != nil {
-				return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
+				return element, &CorruptElement{fmt.Errorf("GetElement(): [%s] %v", tag.Tag, err)}
 			}
 			element.ValueLength, err = elementStream.getUint32()
 			if err != nil {
-				return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
+				return element, &CorruptElement{fmt.Errorf("GetElement(): [%s] %v", tag.Tag, err)}
 			}
 		} else {
 			length, err := elementStream.getUint16()
 			if err != nil {
-				return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
+				return element, &CorruptElement{fmt.Errorf("GetElement(): [%s] %v", tag.Tag, err)}
 			}
 			element.ValueLength = uint32(length)
 		}
@@ -88,14 +113,14 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 		// implicit VR -- all VR length definitions are 32 bits
 		element.ValueLength, err = elementStream.getUint32()
 		if err != nil {
-			return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
+			return element, &CorruptElement{fmt.Errorf("GetElement(): [%s] %v", tag.Tag, err)}
 		}
 	}
 	if element.ValueLength == 0xFFFFFFFF {
 		var parseElements = (element.VR == "SQ")
 		items, err := elementStream.getSequence(parseElements)
 		if err != nil {
-			return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
+			return element, &CorruptElement{fmt.Errorf("GetElement(): [%s] %v", tag.Tag, err)}
 		}
 		element.Items = items
 	} else {
@@ -105,18 +130,20 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 		if element.ValueLength > 0 {
 			err = elementStream.read(valuebuf)
 			if err != nil {
-				return element, fmt.Errorf(" GetElement %s: %v", tag.Tag, err)
+				return element, &CorruptElement{fmt.Errorf("GetElement(): [%s] %v", tag.Tag, err)}
 			}
 			padchars := []byte{0x00, 0x20}
-			switch element.VR {
-			case "UI", "OB", "CS", "DS", "IS", "AE", "AS", "DA", "DT", "LO", "LT", "OD", "OF", "OW", "PN", "SH", "ST", "TM", "UT":
-				for _, chr := range padchars {
-					if valuebuf[len(valuebuf)-1] == chr {
-						valuebuf = valuebuf[:len(valuebuf)-1]
-						element.ValueLength--
-					} else if valuebuf[0] == chr { // NOTE: assumes padding will only take place on one side. Should be fine.
-						valuebuf = valuebuf[1:]
-						element.ValueLength--
+			if element.ValueLength > 1 { // cannot strip padding characters if it would leave the bytestream with length of 0
+				switch element.VR {
+				case "UI", "OB", "CS", "DS", "IS", "AE", "AS", "DA", "DT", "LO", "LT", "OD", "OF", "OW", "PN", "SH", "ST", "TM", "UT":
+					for _, chr := range padchars {
+						if valuebuf[len(valuebuf)-1] == chr {
+							valuebuf = valuebuf[:len(valuebuf)-1]
+							element.ValueLength--
+						} else if valuebuf[0] == chr { // NOTE: assumes padding will only take place on one side. Should be fine.
+							valuebuf = valuebuf[1:]
+							element.ValueLength--
+						}
 					}
 				}
 			}
@@ -134,7 +161,7 @@ func (elementStream *ElementStream) getUntil(delimiter []byte) ([]byte, error) {
 	for {
 		currentBuffer, err := elementStream.getBytes(136) // 128 bytes plus maximum 8 bytes for delimiter boundary
 		if err != nil {
-			return buf, fmt.Errorf("getUntil(%v): %v", delimiter, err)
+			return buf, &ElementStreamError{fmt.Errorf("getUntil(%v): %v", delimiter, err)}
 		}
 		delimiterPos := bytes.Index(currentBuffer, delimiter)
 		if delimiterPos >= 0 { // found
@@ -145,7 +172,7 @@ func (elementStream *ElementStream) getUntil(delimiter []byte) ([]byte, error) {
 		buf = append(buf[:], currentBuffer[:128]...)
 		_, err = elementStream.reader.Seek(-8, io.SeekCurrent)
 		if err != nil {
-			return buf, fmt.Errorf("getUntil(%v): %v", delimiter, err)
+			return buf, &ElementStreamError{fmt.Errorf("getUntil(%v): %v", delimiter, err)}
 		}
 	}
 }
@@ -156,26 +183,26 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 	for {
 		lower, err := elementStream.getUint16()
 		if err != nil {
-			return items, fmt.Errorf("getSequence(%v): %v", parseElements, err)
+			return items, &ElementStreamError{fmt.Errorf("getSequence(%v): %v", parseElements, err)}
 		}
 		upper, err := elementStream.getUint16()
 		if err != nil {
-			return items, fmt.Errorf("getSequence(%v): %v", parseElements, err)
+			return items, &ElementStreamError{fmt.Errorf("getSequence(%v): %v", parseElements, err)}
 		}
 		tagUint32 := (uint32(lower) << 16) | uint32(upper)
 		if tagUint32 == 0xFFFEE0DD {
 			err := elementStream.skipBytes(4)
 			if err != nil {
-				return items, fmt.Errorf("getSequence(%v): %v", parseElements, err)
+				return items, &ElementStreamError{fmt.Errorf("getSequence(%v): %v", parseElements, err)}
 			}
 			break
 		}
 		if tagUint32 != 0xFFFEE000 {
-			return items, fmt.Errorf("getSequence(%v): 0x%08X != 0xFFFEE000", parseElements, tagUint32)
+			return items, &ElementStreamError{fmt.Errorf("getSequence(%v): 0x%08X != 0xFFFEE000", parseElements, tagUint32)}
 		}
 		length, err := elementStream.getUint32()
 		if err != nil {
-			return items, fmt.Errorf("getSequence(%v): %v", parseElements, err)
+			return items, &ElementStreamError{fmt.Errorf("getSequence(%v): %v", parseElements, err)}
 		}
 
 		var elements = make(map[uint32]Element)
@@ -193,12 +220,12 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 				// try to grab an element according to current TransferSyntax
 				e, err := elementStream.GetElement()
 				if err != nil {
-					return items, fmt.Errorf("getSequence(%v): %v", parseElements, err)
+					return items, &CorruptElement{fmt.Errorf("getSequence(%v): %v", parseElements, err)}
 				}
 				elements[uint32(e.Tag)] = e
 				check, err := elementStream.getBytes(4)
 				if err != nil {
-					return items, fmt.Errorf("getSequence(%v): %v", parseElements, err)
+					return items, &ElementStreamError{fmt.Errorf("getSequence(%v): %v", parseElements, err)}
 				}
 				if bytes.Compare(check, delimitationItemBytes) == 0 {
 					// end
@@ -210,14 +237,14 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 			// now we must skip four bytes (0x00{4}) (see: NEMA Table 7.5-3)
 			err = elementStream.skipBytes(4)
 			if err != nil {
-				return items, fmt.Errorf("getSequence(%v): %v", parseElements, err)
+				return items, &ElementStreamError{fmt.Errorf("getSequence(%v): %v", parseElements, err)}
 			}
 		} else {
 			// try to grab an element according to current TransferSyntax
 			if !parseElements {
 				valuebuffer, err := elementStream.getBytes(uint(length))
 				if err != nil {
-					return items, fmt.Errorf("getSequence(%v): %v", parseElements, err)
+					return items, &ElementStreamError{fmt.Errorf("getSequence(%v): %v", parseElements, err)}
 				}
 				unknownBuffers = append(unknownBuffers, valuebuffer)
 			} else {
@@ -232,7 +259,7 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 				}
 				element, err := elementStream.GetElement()
 				if err != nil {
-					return items, fmt.Errorf("getSequence(%v): %v", parseElements, err)
+					return items, &CorruptElement{fmt.Errorf("getSequence(%v): %v", parseElements, err)}
 				}
 				elements[uint32(element.Tag)] = element
 			}
@@ -247,10 +274,10 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 func (elementStream *ElementStream) skipBytes(num int64) error {
 	nseek, err := elementStream.reader.Seek(num, os.SEEK_CUR)
 	if nseek < num {
-		return fmt.Errorf("skipBytes(%d): nseek = %d", num, nseek)
+		return &ElementStreamError{fmt.Errorf("skipBytes(%d): nseek = %d", num, nseek)}
 	}
 	if err != nil {
-		return fmt.Errorf("skipBytes(%d): %v", num, err)
+		return &ElementStreamError{fmt.Errorf("skipBytes(%d): %v", num, err)}
 	}
 	return nil
 }
@@ -267,20 +294,19 @@ func (elementStream *ElementStream) read(v interface{}) error {
 		err = binary.Read(elementStream.reader, binary.BigEndian, v)
 	}
 	if err != nil {
-		return fmt.Errorf("read: %v", err)
-		//return fmt.Errorf("read [offset=0x%x]: %v", elementStream.getPosition(), err)
+		return &ElementStreamError{fmt.Errorf("read(...): %v", err)}
 	}
-	return err
+	return nil
 }
 
 func (elementStream *ElementStream) getUint16() (uint16, error) {
 	buf := make([]byte, 2)
 	nread, err := elementStream.reader.Read(buf)
 	if nread != 2 {
-		return 0, fmt.Errorf("getUint16: nread = %d, wanted 2", nread)
+		return 0, &ElementStreamError{fmt.Errorf("getUint16(): nread = %d (!= 2)", nread)}
 	}
 	if err != nil {
-		return 0, fmt.Errorf("getUint16: %v", err)
+		return 0, &ElementStreamError{fmt.Errorf("getUint16(): %v", err)}
 	}
 	if elementStream.TransferSyntax.Encoding.LittleEndian {
 		return binary.LittleEndian.Uint16(buf), nil
@@ -292,10 +318,10 @@ func (elementStream *ElementStream) getUint32() (uint32, error) {
 	buf := make([]byte, 4)
 	nread, err := elementStream.reader.Read(buf)
 	if nread != 4 {
-		return 0, fmt.Errorf("getUint32: nread = %d, wanted 4", nread)
+		return 0, &ElementStreamError{fmt.Errorf("getUint32(): nread = %d (!= 4)", nread)}
 	}
 	if err != nil {
-		return 0, fmt.Errorf("getUint32: %v", err)
+		return 0, &ElementStreamError{fmt.Errorf("getUint32(): %v", err)}
 	}
 	if elementStream.TransferSyntax.Encoding.LittleEndian {
 		return binary.LittleEndian.Uint32(buf), nil
@@ -307,10 +333,10 @@ func (elementStream *ElementStream) getBytes(num uint) ([]byte, error) {
 	buf := make([]byte, num)
 	nread, err := elementStream.reader.Read(buf)
 	if uint(nread) != num {
-		return buf, fmt.Errorf("getBytes(%d): nread = %d", num, nread)
+		return buf, &ElementStreamError{fmt.Errorf("getBytes(%d): nread = %d (!= %d)", num, nread, num)}
 	}
 	if err != nil {
-		return buf, fmt.Errorf("getBytes: %v", err)
+		return buf, &ElementStreamError{fmt.Errorf("getBytes(%d): %v", num, err)}
 	}
 	return buf, nil
 }
@@ -326,19 +352,52 @@ func NewElementStream(source []byte, transferSyntaxUID string) (ElementStream, e
 }
 
 // LoadBytes loads `nbytes` from its FilePath, starting at offset `nstart`, possibly accepting a partial read.
-func (df *DicomFile) loadBytes(nstart int64, nbytes int, acceptPartialRead bool) ([]byte, error) {
+func (df *Dicom) loadBytes(nstart int64, nbytes int, acceptPartialRead bool) ([]byte, error) {
 	var buffer []byte
+	var bufferSize int64
+
+	if df.ByteSource != nil {
+		if len(df.ByteSource) < 132 {
+			return buffer, &NotADicom{}
+		}
+		if nstart == -1 {
+			nstart = 0
+		}
+		if nstart == 0 && nbytes == -1 {
+			return df.ByteSource, nil // simple, just return all bytes
+		}
+		if nbytes == -1 { // requesting all remaining bytes
+			if int(nstart) > len(df.ByteSource) {
+				return nil, &CorruptDicom{fmt.Errorf("loadBytes(%d, %d, %v): %d > input stream length", nstart, nbytes, acceptPartialRead, nstart)}
+			}
+			return df.ByteSource[nstart:], nil
+		}
+
+		if !acceptPartialRead && int(nstart)+nbytes > len(df.ByteSource) {
+			return nil, &CorruptDicom{fmt.Errorf("loadBytes(%d, %d, %v): input stream length < %d", nstart, nbytes, acceptPartialRead, int(nstart)+nbytes)}
+		}
+		if !acceptPartialRead && int(nstart) > len(df.ByteSource) {
+			return nil, &CorruptDicom{fmt.Errorf("loadBytes(%d, %d, %v): %d > input stream length", nstart, nbytes, acceptPartialRead, nstart)} // TODO: Can this be removed?
+		}
+		if int(nstart)+nbytes > len(df.ByteSource) {
+			return df.ByteSource[nstart:], nil
+		}
+		return df.ByteSource[nstart:nbytes], nil
+	}
+
 	f, err := os.Open(df.FilePath)
 	if err != nil {
-		return buffer, fmt.Errorf("loadBytes(%d, %d, %v): %v", nstart, nbytes, acceptPartialRead, err)
+		return buffer, &CorruptDicom{fmt.Errorf("loadBytes(%d, %d, %v): %v", nstart, nbytes, acceptPartialRead, err)}
 	}
 	defer f.Close()
 	stat, err := f.Stat()
 	if err != nil {
-		return buffer, fmt.Errorf("loadBytes(%d, %d, %v): %v", nstart, nbytes, acceptPartialRead, err)
+		return buffer, &CorruptDicom{fmt.Errorf("loadBytes(%d, %d, %v): %v", nstart, nbytes, acceptPartialRead, err)}
+	}
+	if stat.Size() < 132 {
+		return buffer, &NotADicom{}
 	}
 
-	var bufferSize int64
 	if nbytes == -1 {
 		bufferSize = stat.Size()
 	} else {
@@ -352,60 +411,67 @@ func (df *DicomFile) loadBytes(nstart int64, nbytes int, acceptPartialRead bool)
 	if nstart > -1 {
 		nseek, err := f.Seek(nstart, io.SeekStart)
 		if nseek < nstart {
-			return buffer, fmt.Errorf("loadBytes(%d, %d, %v): nseek = %d, wanted %d", nstart, nbytes, acceptPartialRead, nseek, nstart)
+			return buffer, &CorruptDicom{fmt.Errorf("loadBytes(%d, %d, %v): nseek = %d, wanted %d", nstart, nbytes, acceptPartialRead, nseek, nstart)}
 		}
 		if err != nil {
-			return buffer, fmt.Errorf("loadBytes(%d, %d, %v): %v", nstart, nbytes, acceptPartialRead, err)
+			return buffer, &CorruptDicom{fmt.Errorf("loadBytes(%d, %d, %v): %v", nstart, nbytes, acceptPartialRead, err)}
 		}
 	}
 	nread, err := f.Read(buffer)
 	if err != nil {
-		return buffer, fmt.Errorf("loadBytes(%d, %d, %v): %v", nstart, nbytes, acceptPartialRead, err)
+		return buffer, &CorruptDicom{fmt.Errorf("loadBytes(%d, %d, %v): %v", nstart, nbytes, acceptPartialRead, err)}
 	}
 	if !acceptPartialRead && (int64(nread) < bufferSize) {
-		return buffer, fmt.Errorf("loadBytes(%d, %d, %v): nread = %d, wanted %d", nstart, nbytes, acceptPartialRead, nread, bufferSize)
+		return buffer, &CorruptDicom{fmt.Errorf("loadBytes(%d, %d, %v): nread = %d, wanted %d", nstart, nbytes, acceptPartialRead, nread, bufferSize)}
 	}
 
 	return buffer, nil
 }
 
-func (df *DicomFile) crawlMeta() error {
+func (df *Dicom) crawlMeta() error {
 	bytes, err := df.loadBytes(-1, 1024, true)
 	if err != nil {
-		return fmt.Errorf("crawlMeta: %v", err)
+		switch err.(type) {
+		case *NotADicom:
+			return err
+		default:
+			return &CorruptDicom{fmt.Errorf("crawlMeta(): %v", err)}
+		}
 	}
 	df.elementStream, err = NewElementStream(bytes, "1.2.840.10008.1.2.1")
 	if err != nil {
-		return fmt.Errorf("crawlMeta: %v", err)
-	}
-
-	if df.elementStream.reader.Len() < 132 {
-		return fmt.Errorf("crawlMeta: %s is not a dicom file", df.FilePath)
+		return &CorruptDicom{fmt.Errorf("crawlMeta(): %v", err)}
 	}
 
 	preamble, err := df.elementStream.getBytes(128)
 	if err != nil {
-		return fmt.Errorf("crawlMeta: %v", err)
+		return &CorruptDicom{fmt.Errorf("crawlMeta(): %v", err)}
 	}
 	copy(df.Preamble[:], preamble)
 	dicmTestString, err := df.elementStream.getBytes(4)
 	if err != nil {
-		return fmt.Errorf("crawlMeta: %v", err)
+		return &CorruptDicom{fmt.Errorf("crawlMeta(): %v", err)}
 	}
 	if string(dicmTestString) != "DICM" {
-		return fmt.Errorf("crawlMeta: %s is not a dicom file", df.FilePath)
+		return &NotADicom{}
 	}
 
 	metaLengthElement, err := df.elementStream.GetElement()
 	if err != nil {
-		return fmt.Errorf("crawlMeta: %v", err)
+		return &CorruptDicom{fmt.Errorf("crawlMeta: %v", err)}
 	}
 	df.Elements[uint32(metaLengthElement.Tag)] = metaLengthElement
-	df.TotalMetaBytes = df.elementStream.getPosition() + int64(metaLengthElement.Value().(uint32))
+	val := metaLengthElement.Value()
+	switch val.(type) {
+	case uint32:
+		df.TotalMetaBytes = df.elementStream.getPosition() + int64(val.(uint32))
+	default:
+		return &CorruptDicom{fmt.Errorf("Meta length element is corrupt")}
+	}
 	for {
 		element, err := df.elementStream.GetElement()
 		if err != nil {
-			return fmt.Errorf("crawlMeta: %v", err)
+			return &CorruptDicom{fmt.Errorf("crawlMeta: %v", err)}
 		}
 		df.Elements[uint32(element.Tag)] = element
 
@@ -417,10 +483,10 @@ func (df *DicomFile) crawlMeta() error {
 	return nil
 }
 
-func (df *DicomFile) crawlElements() error {
+func (df *Dicom) crawlElements() error {
 	bytes, err := df.loadBytes(df.TotalMetaBytes, -1, false)
 	if err != nil {
-		return fmt.Errorf("crawlElements: %v", err)
+		return &CorruptDicom{fmt.Errorf("crawlElements(): %v", err)}
 	}
 	var transfersyntaxuid = "1.2.840.10008.1.2.1"
 	// change transfer syntax if necessary
@@ -430,24 +496,29 @@ func (df *DicomFile) crawlElements() error {
 		transfersyntaxuid = tsElement.Value().(string)
 		supported := checkTransferSyntaxSupport(transfersyntaxuid)
 		if !supported {
-			return fmt.Errorf("unsupported transfer syntax: %s", transfersyntaxuid)
+			return &UnsupportedDicom{fmt.Errorf("unsupported transfer syntax: %s", transfersyntaxuid)}
 		}
 	}
 	df.elementStream, err = NewElementStream(bytes, transfersyntaxuid)
 	if err != nil {
-		return fmt.Errorf("crawlElements: %v", err)
+		return &CorruptDicom{fmt.Errorf("crawlElements(): %v", err)}
 	}
 
 	// now parse rest of elements:
-	fileStat, err := os.Stat(df.FilePath)
-	if err != nil {
-		return fmt.Errorf("crawlElements: %v", err)
+	var fileSize int64
+	if df.ByteSource != nil {
+		fileSize = int64(len(df.ByteSource))
+	} else {
+		fileStat, err := os.Stat(df.FilePath)
+		if err != nil {
+			return &CorruptDicom{fmt.Errorf("crawlElements(): %v", err)}
+		}
+		fileSize = fileStat.Size()
 	}
-	fileSize := fileStat.Size()
 	for {
 		element, err := df.elementStream.GetElement()
 		if err != nil {
-			return fmt.Errorf("crawlElements: %v", err)
+			return &CorruptDicom{fmt.Errorf("crawlElements(): %v", err)}
 		}
 		df.Elements[uint32(element.Tag)] = element
 
@@ -463,24 +534,52 @@ func (df *DicomFile) crawlElements() error {
 	return nil
 }
 
-// ParseDicom takes a relative/absolute path to a dicom file and returns a parsed `DicomFile` [+ error]
-func ParseDicom(path string) (DicomFile, error) {
-	dcm := DicomFile{}
+// ParseDicom takes a relative/absolute path to a dicom file and returns a parsed `Dicom` [+ error]
+func ParseDicom(path string) (Dicom, error) {
+	dcm := Dicom{}
 	dcm.FilePath = path
 	dcm.Elements = make(map[uint32]Element)
 
 	if err := dcm.crawlMeta(); err != nil {
-		return dcm, fmt.Errorf(" ParseDicom(%s): %v", filepath.Base(path), err)
+		switch err.(type) {
+		case *NotADicom:
+			return dcm, &NotADicom{fmt.Errorf(`The file "%s" is not a valid dicom`, filepath.Base(path))}
+		default:
+			return dcm, &CorruptDicom{fmt.Errorf(`The file "%s" is corrupt: %v`, filepath.Base(path), err)}
+		}
+
 	}
 	if err := dcm.crawlElements(); err != nil {
-		return dcm, fmt.Errorf(" ParseDicom(%s): %v", filepath.Base(path), err)
+		return dcm, &CorruptDicom{fmt.Errorf(`The dicom "%s" is corrupt: %v`, filepath.Base(path), err)}
+	}
+
+	return dcm, nil
+}
+
+// ParseFromBytes parses a dicom from a bytestream
+func ParseFromBytes(source []byte) (Dicom, error) {
+	dcm := Dicom{}
+	dcm.Elements = make(map[uint32]Element)
+	dcm.ByteSource = source
+
+	if err := dcm.crawlMeta(); err != nil {
+		switch err.(type) {
+		case *NotADicom:
+			return dcm, &NotADicom{fmt.Errorf(`The bytes do not form a valid dicom`)}
+		default:
+			return dcm, &CorruptDicom{fmt.Errorf(`The bytes are corrupt: %v`, err)}
+		}
+
+	}
+	if err := dcm.crawlElements(); err != nil {
+		return dcm, &CorruptDicom{fmt.Errorf(`The bytes are corrupt: %v`, err)}
 	}
 
 	return dcm, nil
 }
 
 // ParseDicomChannel wraps `ParseDicom` in a channel for parsing in a goroutine
-func ParseDicomChannel(path string, dicomchannel chan DicomFile, errorchannel chan error, guard chan struct{}) {
+func ParseDicomChannel(path string, dicomchannel chan Dicom, errorchannel chan error, guard chan struct{}) {
 	if guard != nil {
 		<-guard
 	}

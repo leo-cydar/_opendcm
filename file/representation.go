@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
 
 	"github.com/b71729/opendcm/dictionary"
 	"golang.org/x/text/encoding"
@@ -17,18 +16,19 @@ import (
 	"golang.org/x/text/encoding/unicode"
 )
 
-// DicomFile provides a link between components that make up a parsed DICOM file
-type DicomFile struct {
+// Dicom provides a link between components that make up a parsed DICOM file
+type Dicom struct {
 	FilePath       string
+	ByteSource     []byte
 	elementStream  ElementStream
 	Preamble       [128]byte
 	TotalMetaBytes int64
 	Elements       map[uint32]Element
 }
 
-// GetElement returns an Element inside the DicomFile according to `tag`.
+// GetElement returns an Element inside the Dicom according to `tag`.
 // If the tag is not found, param `bool` will be false.
-func (df DicomFile) GetElement(tag uint32) (Element, bool) {
+func (df Dicom) GetElement(tag uint32) (Element, bool) {
 	e, ok := df.Elements[tag]
 	return e, ok
 }
@@ -100,7 +100,7 @@ type Item struct {
 	UnknownSections [][]byte
 }
 
-// GetElement returns an Element inside the DicomFile according to `tag`.
+// GetElement returns an Element inside the Dicom according to `tag`.
 // If the tag is not found, param `bool` will be false.
 func (i Item) GetElement(tag uint32) (Element, bool) {
 	e, ok := i.Elements[tag]
@@ -214,31 +214,49 @@ func decodeContents(buffer []byte, e *Element) interface{} {
 	case "IS", "DS", "TM", "DA", "DT", "UI", "CS", "AS", "AE":
 		return string(buffer)
 	case "FL": // float
+		if len(buffer) < 4 {
+			goto InsufficientBytes
+		}
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
 			return float32(binary.LittleEndian.Uint32(buffer))
 		}
 		return float32(binary.BigEndian.Uint32(buffer))
 	case "FD": // double
+		if len(buffer) < 8 {
+			goto InsufficientBytes
+		}
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
 			return float64(binary.LittleEndian.Uint64(buffer))
 		}
 		return float64(binary.BigEndian.Uint64(e.value.Bytes()))
 	case "SS": // short
+		if len(buffer) < 2 {
+			goto InsufficientBytes
+		}
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
 			return int16(binary.LittleEndian.Uint16(buffer))
 		}
 		return int16(binary.BigEndian.Uint16(buffer))
 	case "SL": // long
+		if len(buffer) < 4 {
+			goto InsufficientBytes
+		}
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
 			return int32(binary.LittleEndian.Uint32(buffer))
 		}
 		return int32(binary.BigEndian.Uint32(buffer))
 	case "US": // ushort
+		if len(buffer) < 2 {
+			goto InsufficientBytes
+		}
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
 			return binary.LittleEndian.Uint16(buffer)
 		}
 		return binary.BigEndian.Uint16(buffer)
 	case "UL": // ulong
+		if len(buffer) < 4 {
+			goto InsufficientBytes
+		}
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
 			return binary.LittleEndian.Uint32(buffer)
 		}
@@ -248,6 +266,8 @@ func decodeContents(buffer []byte, e *Element) interface{} {
 	default:
 		return buffer
 	}
+InsufficientBytes:
+	return nil
 }
 
 // Value returns an abstraction layer to the underlying bytestream according to VR
@@ -335,7 +355,7 @@ func (e Element) ValueBytes() []byte {
 			continue
 		}
 		for _, v := range item.Elements {
-			log.Printf("Found element: %s", v.Tag)
+			//log.Printf("Found element: %s", v.Tag)
 			buffer = append(buffer, v.ValueBytes()...)
 		}
 	}
