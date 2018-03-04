@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"regexp"
-	"strings"
 )
 
 func check(e error) {
@@ -523,9 +522,7 @@ func (df *DicomFile) crawlElements() error {
 
 		switch element.Tag {
 		case 0x00080005:
-			s := element.Value().(string)
-			s = strings.Replace(s, "\\", "", -1) // TODO: This is a hack. We should parse the dividers properly.
-			df.elementStream.CharacterSet = CharacterSetMap[s]
+			df.elementStream.CharacterSet = CharacterSetMap[element.Value().([]string)[0]]
 		}
 
 		if df.elementStream.getPosition()+df.TotalMetaBytes >= fileSize {
