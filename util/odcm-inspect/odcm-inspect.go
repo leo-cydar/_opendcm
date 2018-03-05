@@ -36,8 +36,7 @@ func main() {
 		fmt.Printf("  %s Failed to stat '%s': %v\n", TermRed("!!"), os.Args[1], err)
 		return
 	}
-	isDir := stat.IsDir()
-	if !isDir {
+	if isDir := stat.IsDir(); !isDir {
 		dcm, err := file.ParseDicom(os.Args[1])
 		if err != nil {
 			fmt.Printf("  %s %v\n", TermRed("!!"), err)
@@ -66,29 +65,34 @@ func main() {
 				fmt.Printf("prevent panic by handling failure accessing a path %q: %v\n", os.Args[1], err)
 				return err
 			}
-			if !info.IsDir() {
-				files = append(files, path)
+			if info.IsDir() {
+				return nil
 			}
+
+			files = append(files, path)
 			return nil
 		})
 
 		// now goroutine each file
-		for _, path := range files {
+		for i, path := range files {
 			guard <- struct{}{} // would block if guard channel is already filled
-			dicomchannel := make(chan file.Dicom)
-			errorchannel := make(chan error)
-			go file.ParseDicomChannel(path, dicomchannel, errorchannel, guard)
-			dicomchannels = append(dicomchannels, dicomchannel)
-			errorchannels = append(errorchannels, errorchannel)
+			dicomchannels = append(dicomchannels, make(chan file.Dicom))
+			errorchannels = append(errorchannels, make(chan error))
+			go file.ParseDicomChannel(path, dicomchannels[i], errorchannels[i], guard)
 		}
 		for i := 0; i < len(dicomchannels); i++ {
 			select {
 			case err := <-errorchannels[i]:
-				log.Printf("%v", err)
+				log.Printf("  %s %v", TermRed("!!"), err)
 			case dcm := <-dicomchannels[i]:
-				e, found := dcm.GetElement(0x00080005)
-				if found {
-					log.Printf("File %s has CharSet: %s", dcm.FilePath, e.Value())
+				if e, found := dcm.GetElement(0x00080005); found {
+					switch val := e.Value().(type) {
+					case []string:
+						log.Printf("File %s has CharSet: %s", dcm.FilePath, val)
+					default:
+						log.Printf("  %s File %s CharSet is not of string type\n", TermRed("!!"), dcm.FilePath)
+						return
+					}
 				}
 			}
 		}

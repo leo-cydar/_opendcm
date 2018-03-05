@@ -217,8 +217,8 @@ type UIDEntry struct {
 }
 
 func (t Tag) String() string {
-	upper := uint32(t) >> 16
-	lower := uint32(t) & 0xff
+	upper := uint16(t >> 16)
+	lower := uint16(t)
 	return fmt.Sprintf("(%04X,%04X)", upper, lower)
 }
 // DicomDictionary provides a mapping between uint32 representation of a DICOM Tag and a DictEntry pointer.

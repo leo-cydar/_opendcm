@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
 
 	"github.com/b71729/opendcm/dictionary"
 	"golang.org/x/text/encoding"
@@ -126,7 +125,6 @@ func splitCharacterStringVM(buffer []byte) [][]byte {
 }
 
 func splitBinaryVM(buffer []byte, nBytesEach int) [][]byte {
-	log.Printf("Splitting bytes: %v @ %d intervals", buffer, nBytesEach)
 	out := make([][]byte, 0)
 	pos := 0
 	for len(buffer) >= pos+nBytesEach {
