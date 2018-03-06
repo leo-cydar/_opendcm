@@ -83,7 +83,6 @@ type ElementStream struct {
 // GetElement yields an `Element` from the active stream, and an `error` if something went wrong.
 func (elementStream *ElementStream) GetElement() (Element, error) {
 	element := Element{}
-	element.FileOffsetStart = elementStream.getPosition() + elementStream.fileOffset
 	element.sourceElementStream = elementStream
 	lower, err := elementStream.getUint16()
 	if err != nil {
@@ -174,7 +173,7 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 		}
 	}
 
-	element.ByteLengthTotal = (elementStream.getPosition() + elementStream.fileOffset) - element.FileOffsetStart
+	element.ByteLengthTotal = (elementStream.GetFilePosition() - elementStream.fileOffset)
 	return element, nil
 }
 
@@ -297,6 +296,9 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 }
 
 func (elementStream *ElementStream) skipBytes(num int64) error {
+	if num == 0 {
+		return nil
+	}
 	nseek, err := elementStream.reader.Seek(num, os.SEEK_CUR)
 	if nseek < num {
 		return CorruptElementStreamError("skipBytes(%d): nseek = %d", num, nseek)
@@ -307,8 +309,22 @@ func (elementStream *ElementStream) skipBytes(num int64) error {
 	return nil
 }
 
-func (elementStream *ElementStream) getPosition() int64 {
-	return elementStream.reader.Size() - int64(elementStream.reader.Len())
+// GetFilePosition returns the current file position
+func (elementStream *ElementStream) GetFilePosition() (pos int64) {
+	pos = elementStream.GetPosition() + elementStream.fileOffset
+	return
+}
+
+// GetPosition returns the current buffer position
+func (elementStream *ElementStream) GetPosition() (pos int64) {
+	pos, _ = elementStream.reader.Seek(0, os.SEEK_CUR)
+	return
+}
+
+// GetRemainingBytes returns the number of remaining unread bytes
+func (elementStream *ElementStream) GetRemainingBytes() (num int) {
+	num = elementStream.reader.Len()
+	return
 }
 
 func (elementStream *ElementStream) read(v interface{}) error {
@@ -355,8 +371,11 @@ func (elementStream *ElementStream) getUint32() (uint32, error) {
 }
 
 func (elementStream *ElementStream) getBytes(num uint) ([]byte, error) {
-	if int(num) > elementStream.reader.Len() {
-		return nil, CorruptElementStreamError("getBytes(%d): would exceed buffer size (%d bytes)", num, elementStream.reader.Len())
+	if num == 0 {
+		return []byte{}, nil
+	}
+	if num > uint(elementStream.GetRemainingBytes()) {
+		return nil, CorruptElementStreamError("getBytes(%d): would exceed buffer size (%d bytes)", num, elementStream.GetRemainingBytes())
 	}
 	buf := make([]byte, num)
 	nread, err := elementStream.reader.Read(buf)
@@ -493,7 +512,7 @@ func (df *Dicom) crawlMeta() error {
 
 	switch val := metaLengthElement.Value().(type) {
 	case uint32:
-		df.TotalMetaBytes = df.elementStream.getPosition() + int64(val)
+		df.TotalMetaBytes = df.elementStream.GetPosition() + int64(val)
 	default:
 		return CorruptDicomError("meta length element is corrupt")
 	}
@@ -506,7 +525,7 @@ func (df *Dicom) crawlMeta() error {
 		}
 		df.Elements[uint32(element.Tag)] = element
 
-		if df.elementStream.getPosition() >= df.TotalMetaBytes {
+		if df.elementStream.GetPosition() >= df.TotalMetaBytes {
 			break
 		}
 	}
@@ -571,7 +590,7 @@ func (df *Dicom) crawlElements() error {
 			}
 		}
 
-		if df.elementStream.getPosition()+df.TotalMetaBytes >= fileSize {
+		if df.elementStream.GetFilePosition() >= fileSize {
 			break
 		}
 	}
