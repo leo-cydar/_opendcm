@@ -2,6 +2,7 @@
 package file
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"errors"
@@ -19,7 +20,8 @@ import (
 // Dicom provides a link between components that make up a parsed DICOM file
 type Dicom struct {
 	FilePath       string
-	ByteSource     []byte
+	reader         *bufio.Reader
+	fileSize       int64
 	elementStream  ElementStream
 	Preamble       [128]byte
 	TotalMetaBytes int64
