@@ -1,5 +1,5 @@
-// Package file implements functionality to parse dicom files
-package file
+// Package dicom implements functionality to parse dicom files
+package dicom
 
 import (
 	"bufio"
@@ -13,7 +13,7 @@ import (
 )
 
 // DicomReadBufferSize is the number of bytes to be buffered from disk when parsing dicoms
-const DicomReadBufferSize = 2 * 1024 * 1024 // 2MB
+const DicomReadBufferSize = 2 * 1024 * 1024 // 10MB
 
 // UnsupportedDicom is an error representing that the `Dicom` is unsupported
 type UnsupportedDicom struct {
@@ -391,10 +391,9 @@ func (df *Dicom) crawlMeta() error {
 	}
 	df.Elements[uint32(metaLengthElement.Tag)] = metaLengthElement
 
-	switch val := metaLengthElement.Value().(type) {
-	case uint32:
+	if val, ok := metaLengthElement.Value().(uint32); ok {
 		df.TotalMetaBytes = df.elementStream.GetPosition() + int64(val)
-	default:
+	} else {
 		return CorruptDicomError("meta length element is corrupt")
 	}
 
@@ -415,23 +414,20 @@ func (df *Dicom) crawlMeta() error {
 }
 
 func (df *Dicom) crawlElements() error {
-	var transfersyntaxuid = "1.2.840.10008.1.2.1"
+	transfersyntaxuid := "1.2.840.10008.1.2.1"
 	// change transfer syntax if necessary
-	tsElement, ok := df.GetElement(0x0020010)
-	if ok {
-		val := tsElement.Value()
-		switch val.(type) {
-		case string:
-			transfersyntaxuid = val.(string)
+	tsElement, found := df.GetElement(0x0020010)
+	if found {
+		if transfersyntaxuid, ok := tsElement.Value().(string); ok {
 			supported := checkTransferSyntaxSupport(transfersyntaxuid)
 			if !supported {
 				return &UnsupportedDicom{fmt.Errorf("unsupported transfer syntax: %s", transfersyntaxuid)}
 			}
-			df.elementStream.SetTransferSyntax(transfersyntaxuid)
-		default:
+		} else {
 			return CorruptDicomError("TransferSyntaxUID is corrupt")
 		}
 	}
+	df.elementStream.SetTransferSyntax(transfersyntaxuid)
 
 	for {
 		element, err := df.elementStream.GetElement()
@@ -442,16 +438,14 @@ func (df *Dicom) crawlElements() error {
 
 		switch element.Tag {
 		case 0x00080005:
-			val := element.Value()
-			switch val.(type) {
-			case []string:
-				if len(val.([]string)) > 0 {
-					df.elementStream.CharacterSet = CharacterSetMap[val.([]string)[0]]
-				} // TODO: Should bad CharacterSet result in CorruptDicom, or instead use UTF8?
-			}
+			if val, ok := element.Value().([]string); ok {
+				if len(val) > 0 {
+					df.elementStream.CharacterSet = CharacterSetMap[val[0]]
+				}
+			} // TODO: Should bad CharacterSet result in CorruptDicom, or instead use UTF8?
 		}
 
-		if df.elementStream.GetPosition() >= df.fileSize {
+		if df.elementStream.GetPosition() >= df.elementStream.readerSize {
 			break
 		}
 	}
@@ -473,10 +467,9 @@ func ParseDicom(path string) (Dicom, error) {
 	if err != nil {
 		return dcm, err
 	}
-	dcm.fileSize = stat.Size()
 
 	dcm.reader = bufio.NewReaderSize(f, DicomReadBufferSize)
-	dcm.elementStream = NewElementStream(dcm.reader, dcm.fileSize)
+	dcm.elementStream = NewElementStream(dcm.reader, stat.Size())
 
 	if err := dcm.crawlMeta(); err != nil {
 		switch err.(type) {
@@ -496,8 +489,10 @@ func ParseDicom(path string) (Dicom, error) {
 // ParseFromBytes parses a dicom from a bytestream
 func ParseFromBytes(source []byte) (Dicom, error) {
 	dcm := Dicom{}
+	r := bytes.NewReader(source)
+	dcm.reader = bufio.NewReaderSize(r, DicomReadBufferSize)
+	dcm.elementStream = NewElementStream(dcm.reader, int64(len(source)))
 	dcm.Elements = make(map[uint32]Element)
-	//dcm.ByteSource = source
 
 	if err := dcm.crawlMeta(); err != nil {
 		switch err.(type) {
@@ -510,7 +505,8 @@ func ParseFromBytes(source []byte) (Dicom, error) {
 	if err := dcm.crawlElements(); err != nil {
 		return dcm, CorruptDicomError(`The bytes are corrupt: %v`, err)
 	}
-
+	dcm.reader = nil
+	dcm.elementStream.reader = nil
 	return dcm, nil
 }
 

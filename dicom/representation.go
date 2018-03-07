@@ -1,5 +1,5 @@
-// Package file implements functionality to parse dicom files
-package file
+// Package dicom implements functionality to parse dicom files
+package dicom
 
 import (
 	"bufio"
@@ -21,7 +21,6 @@ import (
 type Dicom struct {
 	FilePath       string
 	reader         *bufio.Reader
-	fileSize       int64
 	elementStream  ElementStream
 	Preamble       [128]byte
 	TotalMetaBytes int64

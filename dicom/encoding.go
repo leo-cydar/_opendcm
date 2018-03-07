@@ -1,5 +1,5 @@
-// Package file implements functionality to parse dicom files
-package file
+// Package dicom implements functionality to parse dicom files
+package dicom
 
 import (
 	"fmt"
@@ -32,15 +32,15 @@ type Encoding struct {
 }
 
 func (e Encoding) String() string {
-	var s1 = "ImplicitVR"
-	var s2 = "LittleEndian"
+	var implicitness = "ImplicitVR"
+	var endian = "LittleEndian"
 	if !e.ImplicitVR {
-		s1 = "ExplicitVR"
+		implicitness = "ExplicitVR"
 	}
 	if !e.LittleEndian {
-		s2 = "BigEndian"
+		endian = "BigEndian"
 	}
-	return fmt.Sprintf("%s + %s", s1, s2)
+	return fmt.Sprintf("%s + %s", implicitness, endian)
 }
 
 // TransferSyntaxToEncodingMap provides a mapping between transfer syntax UID and encoding
@@ -55,8 +55,8 @@ var TransferSyntaxToEncodingMap = map[string]*Encoding{
 // GetEncodingForTransferSyntax returns the encoding for a given TransferSyntax, or defaults.
 func GetEncodingForTransferSyntax(ts TransferSyntax) *Encoding {
 	if ts.UIDEntry != nil {
-		encoding, ok := TransferSyntaxToEncodingMap[ts.UIDEntry.UID]
-		if ok {
+		encoding, found := TransferSyntaxToEncodingMap[ts.UIDEntry.UID]
+		if found {
 			return encoding
 		}
 	}
