@@ -154,8 +154,8 @@ func main() {
 	check(err)
 
 	data := string(buf)
-	tagRE = regexp.MustCompile("\\([0-9A-Fa-f]{4},[0-9A-Fa-f]{4}\\)")
-	uidStartRE = regexp.MustCompile("([0-9]+\\.[0-9]+\\.[0-9]+)")
+	tagRE = regexp.MustCompile(`\([0-9A-Fa-f]{4},[0-9A-Fa-f]{4}\)`)
+	uidStartRE = regexp.MustCompile(`([0-9]+\.[0-9]+\.[0-9]+)`)
 	stringRE = regexp.MustCompile("([a-zA-Z0-9])")
 	acceptibleVM = regexp.MustCompile("^([0-9-n]+)$")
 

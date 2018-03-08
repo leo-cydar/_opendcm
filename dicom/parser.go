@@ -13,7 +13,7 @@ import (
 )
 
 // DicomReadBufferSize is the number of bytes to be buffered from disk when parsing dicoms
-const DicomReadBufferSize = 2 * 1024 * 1024 // 10MB
+const DicomReadBufferSize = 2 * 1024 * 1024 // 2MB
 
 // UnsupportedDicom is an error representing that the `Dicom` is unsupported
 type UnsupportedDicom struct {
@@ -91,6 +91,7 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 	element.sourceElementStream = elementStream
 
 	startBytePos := elementStream.GetPosition()
+	element.FileOffsetStart = startBytePos
 	lower, err := elementStream.getUint16()
 	if err != nil {
 		return element, CorruptElementError("GetElement(): %v", err)
@@ -233,7 +234,7 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 				if err != nil {
 					return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
 				}
-				if bytes.Compare(check, delimitationItemBytes) == 0 {
+				if bytes.Equal(check, delimitationItemBytes) {
 					// end
 					break
 				}
@@ -281,12 +282,12 @@ func (elementStream *ElementStream) skipBytes(num int) error {
 		return nil
 	}
 	nseek, err := elementStream.reader.Discard(num)
+	if err != nil {
+		return CorruptElementStreamError("skipBytes(%d): %v", num, err)
+	}
 	elementStream.readerPos += int64(nseek)
 	if nseek < num {
 		return CorruptElementStreamError("skipBytes(%d): nseek = %d", num, nseek)
-	}
-	if err != nil {
-		return CorruptElementStreamError("skipBytes(%d): %v", num, err)
 	}
 	return nil
 }
@@ -467,9 +468,13 @@ func ParseDicom(path string) (Dicom, error) {
 	if err != nil {
 		return dcm, err
 	}
-
-	dcm.reader = bufio.NewReaderSize(f, DicomReadBufferSize)
-	dcm.elementStream = NewElementStream(dcm.reader, stat.Size())
+	fileSize := stat.Size()
+	var bufferSize = DicomReadBufferSize
+	if fileSize < DicomReadBufferSize {
+		bufferSize = int(fileSize)
+	}
+	dcm.reader = bufio.NewReaderSize(f, bufferSize)
+	dcm.elementStream = NewElementStream(dcm.reader, fileSize)
 
 	if err := dcm.crawlMeta(); err != nil {
 		switch err.(type) {
@@ -490,7 +495,11 @@ func ParseDicom(path string) (Dicom, error) {
 func ParseFromBytes(source []byte) (Dicom, error) {
 	dcm := Dicom{}
 	r := bytes.NewReader(source)
-	dcm.reader = bufio.NewReaderSize(r, DicomReadBufferSize)
+	var bufferSize = DicomReadBufferSize
+	if len(source) < DicomReadBufferSize {
+		bufferSize = len(source)
+	}
+	dcm.reader = bufio.NewReaderSize(r, bufferSize)
 	dcm.elementStream = NewElementStream(dcm.reader, int64(len(source)))
 	dcm.Elements = make(map[uint32]Element)
 
@@ -505,21 +514,16 @@ func ParseFromBytes(source []byte) (Dicom, error) {
 	if err := dcm.crawlElements(); err != nil {
 		return dcm, CorruptDicomError(`The bytes are corrupt: %v`, err)
 	}
-	dcm.reader = nil
-	dcm.elementStream.reader = nil
 	return dcm, nil
 }
 
 // ParseDicomChannel wraps `ParseDicom` in a channel for parsing in a goroutine
-func ParseDicomChannel(path string, dicomchannel chan Dicom, errorchannel chan error, guard chan struct{}) {
-	if guard != nil {
-		<-guard
-	}
+func ParseDicomChannel(path string, dicomchannel chan Dicom, errorchannel chan error, guard chan bool) {
 	dcm, err := ParseDicom(path)
+	<-guard
 
 	if err != nil {
 		errorchannel <- err
-		return
 	}
 	dicomchannel <- dcm
 }
