@@ -57,7 +57,7 @@ func main() {
 		// parse directory
 		var dicomchannels []chan dicom.Dicom
 		var errorchannels []chan error
-		guard := make(chan struct{}, 64) // TODO: Handle too many open files
+		guard := make(chan bool, 64) // TODO: Handle too many open files
 		var files []string
 
 		filepath.Walk(os.Args[1], func(path string, info os.FileInfo, err error) error {
@@ -75,7 +75,7 @@ func main() {
 
 		// now goroutine each file
 		for i, path := range files {
-			guard <- struct{}{} // would block if guard channel is already filled
+			guard <- true // would block if guard channel is already filled
 			dicomchannels = append(dicomchannels, make(chan dicom.Dicom))
 			errorchannels = append(errorchannels, make(chan error))
 			go dicom.ParseDicomChannel(path, dicomchannels[i], errorchannels[i], guard)

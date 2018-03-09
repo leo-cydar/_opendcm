@@ -247,13 +247,7 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 			}
 		} else {
 			// try to grab an element according to current TransferSyntax
-			if !parseElements {
-				valuebuffer, err := elementStream.getBytes(uint(length))
-				if err != nil {
-					return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
-				}
-				unknownBuffers = append(unknownBuffers, valuebuffer)
-			} else {
+			if parseElements {
 				if length == 0 {
 					continue
 					/* Turns out the data set had bytes:
@@ -268,6 +262,13 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 					return items, CorruptDicomError("getSequence(%v): %v", parseElements, err)
 				}
 				elements[uint32(element.Tag)] = element
+
+			} else {
+				valuebuffer, err := elementStream.getBytes(uint(length))
+				if err != nil {
+					return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
+				}
+				unknownBuffers = append(unknownBuffers, valuebuffer)
 			}
 		}
 		item := Item{Elements: elements, UnknownSections: unknownBuffers}
