@@ -46,10 +46,10 @@ func (e Encoding) String() string {
 // TransferSyntaxToEncodingMap provides a mapping between transfer syntax UID and encoding
 // I couldn't find this mapping in the NEMA documents.
 var TransferSyntaxToEncodingMap = map[string]*Encoding{
-	"1.2.840.10008.1.2":      &Encoding{ImplicitVR: true, LittleEndian: true},
-	"1.2.840.10008.1.2.1":    &Encoding{ImplicitVR: false, LittleEndian: true},
-	"1.2.840.10008.1.2.1.99": &Encoding{ImplicitVR: false, LittleEndian: true},
-	"1.2.840.10008.1.2.2":    &Encoding{ImplicitVR: false, LittleEndian: false},
+	"1.2.840.10008.1.2":      {ImplicitVR: true, LittleEndian: true},
+	"1.2.840.10008.1.2.1":    {ImplicitVR: false, LittleEndian: true},
+	"1.2.840.10008.1.2.1.99": {ImplicitVR: false, LittleEndian: true},
+	"1.2.840.10008.1.2.2":    {ImplicitVR: false, LittleEndian: false},
 }
 
 // GetEncodingForTransferSyntax returns the encoding for a given TransferSyntax, or defaults.

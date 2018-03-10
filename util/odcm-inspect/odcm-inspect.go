@@ -24,7 +24,7 @@ func main() {
 	if isDir := stat.IsDir(); !isDir {
 		dcm, err := dicom.ParseDicom(os.Args[1])
 		if err != nil {
-			console.Fatalf(`error parsing "%s": v`, dcm.FilePath, err)
+			console.Fatalf(`error parsing "%s": %v`, dcm.FilePath, err)
 		}
 		var elements []dicom.Element
 		for _, v := range dcm.Elements {
