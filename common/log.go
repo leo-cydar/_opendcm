@@ -6,13 +6,10 @@ import (
 )
 
 func normaliseWriters(writers ...zapcore.WriteSyncer) zapcore.WriteSyncer {
-	var writer zapcore.WriteSyncer
 	if len(writers) == 1 {
-		writer = writers[0]
-	} else {
-		writer = zapcore.NewMultiWriteSyncer(writers...)
+		return writers[0]
 	}
-	return writer
+	return zapcore.NewMultiWriteSyncer(writers...)
 }
 
 // NewJSONLogger creates a `zap.SugaredLogger` configured for JSON output to `writers`

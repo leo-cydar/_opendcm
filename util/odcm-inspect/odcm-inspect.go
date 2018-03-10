@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/b71729/opendcm/core"
+	"github.com/b71729/opendcm/common"
 	"github.com/b71729/opendcm/dicom"
 )
 

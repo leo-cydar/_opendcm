@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/b71729/opendcm/core"
+	"github.com/b71729/opendcm/common"
 	"github.com/b71729/opendcm/dictionary"
 )
 
