@@ -124,6 +124,33 @@ func TestParseValidFile(t *testing.T) {
 	}
 }
 
+// TestIssue6 attempts to parse a valid file, with a source VR of UN that is matches as non-UN in our dictionary.
+func TestIssue6(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(testDataDirectory, "TCIA", "1.3.12.2.1107.5.1.4.1001.30000013072513125762500009613.dcm")
+	dcm, err := ParseDicom(path)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+
+	// 0028,0107 (LargestImagePixelValue) has VR of US, with value 2766. But source DICOM specifies it as UN.
+	// Check that the correct value has been parsed to prevent regression
+	e, found := dcm.GetElement(0x00280107)
+	if !found {
+		t.Fatalf("could not find (0028,0107) in file")
+	}
+
+	val := e.Value()
+	if !valueTypeMatchesVR(e.VR, val) {
+		t.Fatalf(`type "%s" for element %s is incorrect (VR="%s")`, reflect.TypeOf(val), e.Tag, e.VR)
+	}
+
+	if val.(uint16) != 2766 {
+		t.Fatalf("(0028,0107) did not return expected value of 2766")
+	}
+
+}
+
 /*
 ===============================================================================
 	File Parsing: Invalid DICOMs

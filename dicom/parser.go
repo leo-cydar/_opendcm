@@ -104,20 +104,18 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 	tag, _ := LookupTag(tagUint32)
 	element.DictEntry = tag
 	if !elementStream.TransferSyntax.Encoding.ImplicitVR { // if explicit, read VR from buffer
-		if element.VR == "UN" { // but only if we dont already have VR from dictionary (more reliable)
-			VRbytes, err := elementStream.getBytes(2)
-			if err != nil {
-				return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
-			}
-			element.VR = string(VRbytes)
-		} else { // else just skip two bytes as we are using dictionary value
-			err := elementStream.skipBytes(2)
-			if err != nil {
-				return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
-			}
+		VRbytes, err := elementStream.getBytes(2)
+		if err != nil {
+			return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
 		}
-		if element.VR == "OB" || element.VR == "OW" || element.VR == "SQ" || element.VR == "UN" || element.VR == "UT" {
-			// these VRs, in explicit VR mode, have two reserved bytes following VR definition
+		VRstring := string(VRbytes)
+		if element.VR == "UN" { // only use source VR if we dont already have VR from dictionary (more reliable this way)
+			element.VR = string(VRbytes)
+		}
+
+		// issue #6: use *source* VR as basis for deciding whether to skip / size of length integer.
+		// in explicit VR mode, if the VR is OB, OW, SQ, UN or UT, skip two bytes and read as uint32, else uint16.
+		if VRstring == "OB" || VRstring == "OW" || VRstring == "SQ" || VRstring == "UN" || VRstring == "UT" {
 			err := elementStream.skipBytes(2)
 			if err != nil {
 				return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
