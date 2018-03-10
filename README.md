@@ -1,7 +1,6 @@
 # OpenDCM
 
-[![Build Status](https://travis-ci.org/b71729/opendcm.svg?branch=master)](https://travis-ci.org/b71729/opendcm)
-
+[![Go Report Card](https://goreportcard.com/badge/github.com/b71729/opendcm)](https://goreportcard.com/report/github.com/b71729/opendcm) [![Build Status](https://travis-ci.org/b71729/opendcm.svg?branch=master)](https://travis-ci.org/b71729/opendcm)
 
 
 
