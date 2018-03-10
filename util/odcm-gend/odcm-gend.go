@@ -5,26 +5,21 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/b71729/opendcm/core"
 	"github.com/b71729/opendcm/dictionary"
 )
 
-// TermError provides ansi escape codes for a red "!!" section.
-const TermError = "\x1b[31;1m  !!\x1b[0m"
-
-// TermWarn provides ansi escape codes for a red "!!" section.
-const TermWarn = "\x1b[33;1m  !!\x1b[0m"
+var console = core.NewConsoleLogger(os.Stdout)
 
 func check(err error) {
 	if err != nil {
-		fmt.Printf("%s %v\n", TermError, err)
-		os.Exit(1)
+		console.Fatal(err)
 	}
 }
 
@@ -79,7 +74,7 @@ func ParseDataElements(data string) (elements []dictionary.DictEntry) {
 				elements[index].VR = token[:2]
 			default:
 				elements[index].VR = "UN"
-				log.Printf("%s Warning: VR for Data Element %s is '%s'. Using 'UN' instead.", TermWarn, elements[index].Tag, token)
+				console.Warnf("VR for Data Element %s is '%s'. Using 'UN' instead.", elements[index].Tag, token)
 			}
 		case 5:
 			orIndex := strings.Index(token, " or")
@@ -87,7 +82,7 @@ func ParseDataElements(data string) (elements []dictionary.DictEntry) {
 				token = token[:orIndex]
 			}
 			if !acceptibleVM.Match([]byte(token)) {
-				log.Printf("%s Warning: VM for Data Element %s is '%s'. Using 'n' instead.", TermWarn, elements[index].Tag, token)
+				console.Warnf("VM for Data Element %s is '%s'. Using 'n' instead.", elements[index].Tag, token)
 				token = "n"
 			}
 			elements[index].VM = token
@@ -139,8 +134,7 @@ func tableBodyPosition(data string) (posStart int, posEnd int, err error) {
 // Generates a DICOM data dictionary file from XML
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Printf("%s Usage: %s dictfromNEMA.xml\n", TermError, filepath.Base(os.Args[0]))
-		return
+		console.Fatalf("usage: %s dictfromNEMA.xml", filepath.Base(os.Args[0]))
 	}
 	stat, err := os.Stat(os.Args[1])
 	check(err)
@@ -164,7 +158,7 @@ func main() {
 	check(err)
 
 	dataElements := ParseDataElements(data[posStart+7 : posEnd])
-	log.Printf("Found %d data elements\n", len(dataElements))
+	console.Infof("found %d data elements", len(dataElements))
 
 	// file meta elements
 	data = data[posEnd+8:]
@@ -172,7 +166,7 @@ func main() {
 	check(err)
 
 	fileMetaElements := ParseDataElements(data[posStart+7 : posEnd])
-	log.Printf("Found %d file meta elements\n", len(fileMetaElements))
+	console.Infof("found %d file meta elements", len(fileMetaElements))
 
 	// directory structure elements
 	data = data[posEnd+8:]
@@ -180,7 +174,7 @@ func main() {
 	check(err)
 
 	dirStructElements := ParseDataElements(data[posStart+7 : posEnd])
-	log.Printf("Found %d directory structure elements\n", len(dirStructElements))
+	console.Infof("found %d directory structure elements", len(dirStructElements))
 
 	// UIDs
 	data = data[posEnd+8:]
@@ -188,7 +182,7 @@ func main() {
 	check(err)
 
 	UIDs := ParseUIDs(data[posStart+7 : posEnd])
-	log.Printf("Found %d UIDs elements\n", len(UIDs))
+	console.Infof("found %d UIDs elements", len(UIDs))
 
 	// build golang string
 	outF, err := os.Create("../../dictionary/datadict.go")
@@ -253,5 +247,5 @@ var UIDDictionary = map[string]*UIDEntry{
 	// write to disk
 	_, err = outF.WriteString(outCode)
 	check(err)
-	log.Printf("Wrote file OK.")
+	console.Infof("wrote file OK")
 }

@@ -135,16 +135,6 @@ func splitBinaryVM(buffer []byte, nBytesEach int) [][]byte {
 	return out
 }
 
-// SupportsMultipleVM returns whether the VR can support multiple values
-func SupportsMultipleVM(vr string) bool {
-	switch vr {
-	case "LT", "ST", "UT":
-		return false
-	default:
-		return true
-	}
-}
-
 // LookupTag searches for the corresponding `dictionary.DicomDictionary` entry for the given tag uint32
 func LookupTag(t uint32) (*dictionary.DictEntry, bool) {
 	val, ok := dictionary.DicomDictionary[t]
@@ -180,7 +170,11 @@ func (e Element) Describe() []string {
 		description = append(description, fmt.Sprintf("[%s] %s %s:", e.VR, e.Tag, e.Name))
 		for _, item := range e.Items {
 			for _, e := range item.Elements {
-				description = append(description, fmt.Sprintf("     - %s [%s] %v", e.Tag, e.VR, e.Value()))
+				if e.ValueLength <= 256 {
+					description = append(description, fmt.Sprintf("     - %s [%s] %v", e.Tag, e.VR, e.Value()))
+				} else {
+					description = append(description, fmt.Sprintf("     - %s [%s] (%d bytes)", e.Tag, e.VR, e.ValueLength))
+				}
 			}
 
 			for _, b := range item.UnknownSections {

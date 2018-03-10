@@ -519,9 +519,8 @@ func ParseFromBytes(source []byte) (Dicom, error) {
 }
 
 // ParseDicomChannel wraps `ParseDicom` in a channel for parsing in a goroutine
-func ParseDicomChannel(path string, dicomchannel chan Dicom, errorchannel chan error, guard chan bool) {
+func ParseDicomChannel(path string, dicomchannel chan Dicom, errorchannel chan error) {
 	dcm, err := ParseDicom(path)
-	<-guard
 
 	if err != nil {
 		errorchannel <- err
