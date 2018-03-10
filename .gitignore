@@ -12,3 +12,6 @@
 
 # DICOM data
 util/odcm-gend/*.xml
+
+# go dep
+vendor/
