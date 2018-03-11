@@ -1,12 +1,9 @@
-package core
+package common
 
 import (
 	"os"
 	"path/filepath"
 )
-
-// OpenFileLimit restricts the number of concurrently open files
-var OpenFileLimit = 64
 
 // ConcurrentlyWalkDir recursively traverses a directory and calls `onFile` for each found file inside a goroutine.
 func ConcurrentlyWalkDir(dirPath string, onFile func(file string)) error {

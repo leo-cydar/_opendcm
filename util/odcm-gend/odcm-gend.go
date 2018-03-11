@@ -15,7 +15,7 @@ import (
 	"github.com/b71729/opendcm/dictionary"
 )
 
-var console = core.NewConsoleLogger(os.Stdout)
+var console = common.NewConsoleLogger(os.Stdout)
 
 func check(err error) {
 	if err != nil {

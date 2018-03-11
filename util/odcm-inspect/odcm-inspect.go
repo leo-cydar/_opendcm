@@ -11,7 +11,7 @@ import (
 	"github.com/b71729/opendcm/dicom"
 )
 
-var console = core.NewConsoleLogger(os.Stdout)
+var console = common.NewConsoleLogger(os.Stdout)
 
 func main() {
 	if len(os.Args) != 2 || os.Args[1] == "-h" || os.Args[1] == "--help" {
@@ -38,7 +38,7 @@ func main() {
 			}
 		}
 	} else {
-		err := core.ConcurrentlyWalkDir(os.Args[1], func(filepath string) {
+		err := common.ConcurrentlyWalkDir(os.Args[1], func(filepath string) {
 			dcm, err := dicom.ParseDicom(filepath)
 			if err != nil {
 				console.Errorf("%v", err)

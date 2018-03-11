@@ -430,6 +430,9 @@ func (df *Dicom) crawlElements() error {
 	df.elementStream.SetTransferSyntax(transfersyntaxuid)
 
 	for {
+		if df.elementStream.GetPosition() >= df.elementStream.readerSize {
+			break
+		}
 		element, err := df.elementStream.GetElement()
 		if err != nil {
 			return CorruptDicomError("crawlElements(): %v", err)
@@ -443,10 +446,6 @@ func (df *Dicom) crawlElements() error {
 					df.elementStream.CharacterSet = CharacterSetMap[val[0]]
 				}
 			} // TODO: Should bad CharacterSet result in CorruptDicom, or instead use UTF8?
-		}
-
-		if df.elementStream.GetPosition() >= df.elementStream.readerSize {
-			break
 		}
 	}
 	return nil
