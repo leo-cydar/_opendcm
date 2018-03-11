@@ -10,10 +10,23 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+
+	"github.com/b71729/opendcm/common"
 )
 
 // DicomReadBufferSize is the number of bytes to be buffered from disk when parsing dicoms
 const DicomReadBufferSize = 2 * 1024 * 1024 // 2MB
+
+/*
+  By enabling `StrictMode`, the parser will reject DICOM inputs which either:
+    - TODO: Contain an element with a value length exceeding the maximum allowed for its VR
+    - Contain an element with a value length exceeding the remaining file size. For example incomplete Pixel Data.
+*/
+
+// StrictMode controls whether the parser operates in a restricted manner, rejecting potentially corrupt data.
+var StrictMode = false
+
+var console = common.NewConsoleLogger(os.Stderr)
 
 // UnsupportedDicom is an error representing that the `Dicom` is unsupported
 type UnsupportedDicom struct {
@@ -27,6 +40,10 @@ type NotADicom struct {
 
 // CorruptDicom is an error representing that a `Dicom` is corrupt
 type CorruptDicom struct {
+	error
+}
+
+type InsufficientBytes struct {
 	error
 }
 
@@ -155,7 +172,21 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 		if element.ValueLength > 0 {
 			valuebuf, err := elementStream.getBytes(uint(element.ValueLength))
 			if err != nil {
-				return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
+				switch err.(type) {
+				case InsufficientBytes:
+					if StrictMode {
+						return element, err
+					}
+					// not running in safe mode, we can truncate the buffer to remaining bytes
+					console.Warnf("element %s's value length was truncated from %d to %d bytes due to reaching end of the file. use with caution.", element.Tag, element.ValueLength, elementStream.GetRemainingBytes())
+					element.ValueLength = uint32(elementStream.GetRemainingBytes())
+					valuebuf, err = elementStream.getBytes(uint(element.ValueLength))
+					if err != nil {
+						return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
+					}
+				default:
+					return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
+				}
 			}
 			padchars := []byte{0x00, 0x20}
 			if element.ValueLength > 1 { // cannot strip padding characters if it would leave the bytestream with length of 0
@@ -280,6 +311,9 @@ func (elementStream *ElementStream) skipBytes(num int) error {
 	if num == 0 {
 		return nil
 	}
+	if numRemaining := elementStream.GetRemainingBytes(); numRemaining < int64(num) {
+		return CorruptElementStreamError("skipBytes(%d): would exceed buffer size (%d bytes)", num, numRemaining)
+	}
 	nseek, err := elementStream.reader.Discard(num)
 	if err != nil {
 		return CorruptElementStreamError("skipBytes(%d): %v", num, err)
@@ -304,6 +338,9 @@ func (elementStream *ElementStream) GetRemainingBytes() (num int64) {
 }
 
 func (elementStream *ElementStream) getUint16() (uint16, error) {
+	if numRemaining := elementStream.GetRemainingBytes(); numRemaining < 2 {
+		return 0, CorruptElementStreamError("getUint16(): would exceed buffer size (%d bytes)", numRemaining)
+	}
 	buf := make([]byte, 2)
 	nread, err := io.ReadFull(elementStream.reader, buf)
 	if err != nil {
@@ -320,6 +357,9 @@ func (elementStream *ElementStream) getUint16() (uint16, error) {
 }
 
 func (elementStream *ElementStream) getUint32() (uint32, error) {
+	if numRemaining := elementStream.GetRemainingBytes(); numRemaining < 4 {
+		return 0, CorruptElementStreamError("getUint32(): would exceed buffer size (%d bytes)", numRemaining)
+	}
 	buf := make([]byte, 4)
 	nread, err := io.ReadFull(elementStream.reader, buf)
 	if err != nil {
@@ -341,7 +381,7 @@ func (elementStream *ElementStream) getBytes(num uint) ([]byte, error) {
 		return []byte{}, nil
 	}
 	if num > uint(elementStream.GetRemainingBytes()) {
-		return nil, CorruptElementStreamError("getBytes(%d): would exceed buffer size (%d bytes)", num, elementStream.GetRemainingBytes())
+		return nil, InsufficientBytes{fmt.Errorf("getBytes(%d): (offset 0x%X): would exceed buffer size (%d bytes)", num, elementStream.GetPosition(), elementStream.GetRemainingBytes())}
 	}
 	buf := make([]byte, num)
 	nread, err := io.ReadFull(elementStream.reader, buf)

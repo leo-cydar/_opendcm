@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -21,9 +22,12 @@ var validSequenceElementBytes = []byte{0x32, 0x00, 0x64, 0x10, 0x53, 0x51, 0x00,
 var validCSElementBytes = []byte{0x28, 0x00, 0x04, 0x00, 0x43, 0x53, 0x0C, 0x00, 0x4D, 0x4F, 0x4E, 0x4F, 0x43, 0x48, 0x52, 0x4F, 0x4D, 0x45, 0x32, 0x20}
 
 func elementFromBuffer(buf []byte) (Element, error) {
-	r := bufio.NewReader(bytes.NewReader(buf))
-	es := NewElementStream(r, int64(len(buf)))
-	return es.GetElement()
+	return elementStreamFromBuffer(buf).GetElement()
+}
+
+func elementStreamFromBuffer(buf []byte) *ElementStream {
+	es := NewElementStream(bufio.NewReader(bytes.NewReader(buf)), int64(len(buf)))
+	return &es
 }
 
 func valueTypeMatchesVR(vr string, v interface{}) bool {
@@ -176,7 +180,6 @@ func TestParseCorruptDicoms(t *testing.T) {
 	t.Parallel()
 	// attempt to parse corrupt dicoms
 	corruptFiles := []string{
-		"CorruptOverflowElementLength.dcm",
 		"CorruptBadTransferSyntax.dcm",
 		"CorruptMissingMetaLength.dcm",
 	}
@@ -187,6 +190,52 @@ func TestParseCorruptDicoms(t *testing.T) {
 		case *CorruptDicom:
 		default:
 			t.Fatalf(`parsing corrupt dicom "%s" should have raised a CorruptDicomError (got %v)`, path, err)
+		}
+	}
+}
+
+/*
+===============================================================================
+	Strict Mode Tests
+===============================================================================
+*/
+
+func TestStrictMode(t *testing.T) {
+	t.Parallel() // ?
+	// in strict mode, inputs with elements exceeding remaining file size should be rejected
+	StrictMode = true
+	path := filepath.Join(testDataDirectory, "synthetic", "CorruptOverflowElementLength.dcm")
+	_, err := ParseDicom(path)
+	switch err.(type) {
+	case *CorruptDicom:
+	default:
+		t.Fatalf(`with "StrictMode" disabled, parsing "%s" should have raised a CorruptDicomError (got %v)`, path, err)
+	}
+
+	// in non strict mode, inputs with elements exceeding remaining file size should not be rejected,
+	// and should have their length adjusted.
+	StrictMode = false
+	_, err = ParseDicom(path)
+	if err != nil {
+		t.Fatalf(`with "StrictMode" disabled, parsing "%s" should not have raised an error (got %v)`, path, err)
+	}
+}
+
+func TestGetElementWithInsufficientBytes(t *testing.T) {
+	t.Parallel()
+	testCases := [][]byte{
+		make([]byte, 0), // cannot read lower section of tag
+		make([]byte, 2), // cannot read upper section of tag
+		make([]byte, 4), // cannot read VR
+	}
+	for _, buf := range testCases {
+		_, err := elementFromBuffer(buf)
+		if errValue, ok := err.(*CorruptElement); ok {
+			if !strings.Contains(errValue.Error(), "would exceed") {
+				t.Fatalf(`should have contained detail containing "would exceed" (got %s)`, errValue.Error())
+			}
+		} else {
+			t.Fatalf(`should have raised a CorruptElementError (got %v)`, err)
 		}
 	}
 }
