@@ -148,7 +148,23 @@ func TestIssue6(t *testing.T) {
 	if val.(uint16) != 2766 {
 		t.Fatalf("(0028,0107) did not return expected value of 2766")
 	}
+}
 
+func TestParseFileWithZeroElementLength(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(testDataDirectory, "synthetic", "ZeroElementLength.dcm")
+	dcm, err := ParseDicom(path)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	e, found := dcm.GetElement(0x00080005)
+	if !found {
+		t.Fatalf("could not find (0008,0005) in file")
+	}
+
+	if e.ValueLength != 0 {
+		t.Fatalf("(0008,0005) has value length of %d (!= 0)", e.ValueLength)
+	}
 }
 
 /*
@@ -161,11 +177,8 @@ func TestParseCorruptDicoms(t *testing.T) {
 	// attempt to parse corrupt dicoms
 	corruptFiles := []string{
 		"CorruptOverflowElementLength.dcm",
-		// "CorruptZeroElementLength.dcm",
-		// "CorruptZeroElementLength.dcm",
-		// "CorruptTruncated.dcm",
-		// "CorruptBadTransferSyntax.dcm",
-		// "CorruptMissingMetaLength.dcm",
+		"CorruptBadTransferSyntax.dcm",
+		"CorruptMissingMetaLength.dcm",
 	}
 	for _, file := range corruptFiles {
 		path := filepath.Join(testDataDirectory, "synthetic", file)
