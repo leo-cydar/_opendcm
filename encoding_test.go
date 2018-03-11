@@ -1,4 +1,4 @@
-package dicom
+package opendcm
 
 import (
 	"testing"

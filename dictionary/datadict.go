@@ -2,7 +2,7 @@
 
 package dictionary
 
-import ("fmt")
+import "fmt"
 
 type Tag uint32
 

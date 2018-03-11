@@ -1,4 +1,4 @@
-package dicom
+package opendcm
 
 import (
 	"bufio"
@@ -15,9 +15,6 @@ import (
 	Utilities
 ===============================================================================
 */
-
-// shorthand for accessing the testdata directory
-var testDataDirectory = filepath.Join("..", "testdata")
 
 // array of bytes representing a valid "SQ" VR element
 var validSequenceElementBytes = []byte{0x32, 0x00, 0x64, 0x10, 0x53, 0x51, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE, 0xFF, 0x00, 0xE0, 0xFF, 0xFF, 0xFF, 0xFF, 0x08, 0x00, 0x00, 0x01, 0x53, 0x48, 0x0E, 0x00, 0x53, 0x4E, 0x47, 0x30, 0x41, 0x47, 0x2F, 0x5A, 0x54, 0x58, 0x30, 0x58, 0x42, 0x20, 0x08, 0x00, 0x02, 0x01, 0x53, 0x48, 0x0A, 0x00, 0x53, 0x45, 0x43, 0x54, 0x52, 0x41, 0x20, 0x52, 0x49, 0x53, 0x08, 0x00, 0x03, 0x01, 0x53, 0x48, 0x04, 0x00, 0x31, 0x2E, 0x30, 0x20, 0x08, 0x00, 0x04, 0x01, 0x4C, 0x4F, 0x0A, 0x00, 0x4D, 0x52, 0x20, 0x4B, 0x6E, 0x65, 0x20, 0x73, 0x69, 0x6E, 0xFE, 0xFF, 0x0D, 0xE0, 0x00, 0x00, 0x00, 0x00, 0xFE, 0xFF, 0xDD, 0xE0, 0x00, 0x00, 0x00, 0x00}
@@ -109,7 +106,7 @@ func valueTypeMatchesVR(vr string, v interface{}) bool {
 // TestParseValidFile tests that, given a valid DICOM input, the parser will correctly parse embedded elements
 func TestParseValidFile(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(testDataDirectory, "TCIA", "1.3.6.1.4.1.14519.5.2.1.2744.7002.251446451370536632612663178782.dcm")
+	path := filepath.Join("testdata", "TCIA", "1.3.6.1.4.1.14519.5.2.1.2744.7002.251446451370536632612663178782.dcm")
 	dcm, err := ParseDicom(path)
 	if err != nil {
 		t.Fatalf("error: %v", err)
@@ -139,7 +136,7 @@ func TestParseValidFile(t *testing.T) {
 // TestIssue6 attempts to parse a valid file, with a source VR of UN that is matches as non-UN in our dictionary.
 func TestIssue6(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(testDataDirectory, "TCIA", "1.3.12.2.1107.5.1.4.1001.30000013072513125762500009613.dcm")
+	path := filepath.Join("testdata", "TCIA", "1.3.12.2.1107.5.1.4.1001.30000013072513125762500009613.dcm")
 	dcm, err := ParseDicom(path)
 	if err != nil {
 		t.Fatalf("error: %v", err)
@@ -166,7 +163,7 @@ func TestIssue6(t *testing.T) {
 // element with a defined length of zero
 func TestParseFileWithZeroElementLength(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(testDataDirectory, "synthetic", "ZeroElementLength.dcm")
+	path := filepath.Join("testdata", "synthetic", "ZeroElementLength.dcm")
 	dcm, err := ParseDicom(path)
 	if err != nil {
 		t.Fatalf("error: %v", err)
@@ -195,7 +192,7 @@ func TestParseCorruptDicoms(t *testing.T) {
 		"CorruptMissingMetaLength.dcm",
 	}
 	for _, file := range corruptFiles {
-		path := filepath.Join(testDataDirectory, "synthetic", file)
+		path := filepath.Join("testdata", "synthetic", file)
 		_, err := ParseDicom(path)
 		switch err.(type) {
 		case *CorruptDicom:
@@ -212,10 +209,9 @@ func TestParseCorruptDicoms(t *testing.T) {
 */
 
 func TestStrictModeEnabled(t *testing.T) {
-	t.Parallel() // ?
 	// in strict mode, inputs with elements exceeding remaining file size should be rejected
 	StrictMode = true
-	path := filepath.Join(testDataDirectory, "synthetic", "CorruptOverflowElementLength.dcm")
+	path := filepath.Join("testdata", "synthetic", "CorruptOverflowElementLength.dcm")
 	_, err := ParseDicom(path)
 	switch err.(type) {
 	case *CorruptDicom:
@@ -224,11 +220,10 @@ func TestStrictModeEnabled(t *testing.T) {
 	}
 }
 func TestStrictModeDisabled(t *testing.T) {
-	t.Parallel() // ?
 	// in non strict mode, inputs with elements exceeding remaining file size should not be rejected,
 	// and should have their length adjusted.
 	StrictMode = false
-	path := filepath.Join(testDataDirectory, "synthetic", "CorruptOverflowElementLength.dcm")
+	path := filepath.Join("testdata", "synthetic", "CorruptOverflowElementLength.dcm")
 	_, err := ParseDicom(path)
 	if err != nil {
 		t.Fatalf(`with "StrictMode" disabled, parsing "%s" should not have raised an error (got %v)`, path, err)

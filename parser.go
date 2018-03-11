@@ -1,5 +1,4 @@
-// Package dicom implements functionality to parse dicom files
-package dicom
+package opendcm
 
 import (
 	"bufio"
@@ -10,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-
-	"github.com/b71729/opendcm/common"
 )
 
 // DicomReadBufferSize is the number of bytes to be buffered from disk when parsing dicoms
@@ -26,7 +23,7 @@ const DicomReadBufferSize = 2 * 1024 * 1024 // 2MB
 // StrictMode controls whether the parser operates in a restricted manner, rejecting potentially corrupt data.
 var StrictMode = false
 
-var console = common.NewConsoleLogger(os.Stderr)
+var console = NewConsoleLogger(os.Stderr)
 
 // UnsupportedDicom is an error representing that the `Dicom` is unsupported
 type UnsupportedDicom struct {

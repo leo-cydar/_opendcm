@@ -1,5 +1,4 @@
-// Package dicom implements functionality to parse dicom files
-package dicom
+package opendcm
 
 import (
 	"fmt"
