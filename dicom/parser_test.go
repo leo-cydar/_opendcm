@@ -16,20 +16,27 @@ import (
 ===============================================================================
 */
 
+// shorthand for accessing the testdata directory
 var testDataDirectory = filepath.Join("..", "testdata")
 
+// array of bytes representing a valid "SQ" VR element
 var validSequenceElementBytes = []byte{0x32, 0x00, 0x64, 0x10, 0x53, 0x51, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE, 0xFF, 0x00, 0xE0, 0xFF, 0xFF, 0xFF, 0xFF, 0x08, 0x00, 0x00, 0x01, 0x53, 0x48, 0x0E, 0x00, 0x53, 0x4E, 0x47, 0x30, 0x41, 0x47, 0x2F, 0x5A, 0x54, 0x58, 0x30, 0x58, 0x42, 0x20, 0x08, 0x00, 0x02, 0x01, 0x53, 0x48, 0x0A, 0x00, 0x53, 0x45, 0x43, 0x54, 0x52, 0x41, 0x20, 0x52, 0x49, 0x53, 0x08, 0x00, 0x03, 0x01, 0x53, 0x48, 0x04, 0x00, 0x31, 0x2E, 0x30, 0x20, 0x08, 0x00, 0x04, 0x01, 0x4C, 0x4F, 0x0A, 0x00, 0x4D, 0x52, 0x20, 0x4B, 0x6E, 0x65, 0x20, 0x73, 0x69, 0x6E, 0xFE, 0xFF, 0x0D, 0xE0, 0x00, 0x00, 0x00, 0x00, 0xFE, 0xFF, 0xDD, 0xE0, 0x00, 0x00, 0x00, 0x00}
+
+// array of bytes representing a valid "CS" VR element
 var validCSElementBytes = []byte{0x28, 0x00, 0x04, 0x00, 0x43, 0x53, 0x0C, 0x00, 0x4D, 0x4F, 0x4E, 0x4F, 0x43, 0x48, 0x52, 0x4F, 0x4D, 0x45, 0x32, 0x20}
 
+// shorthand for parsing an Element from a byte array
 func elementFromBuffer(buf []byte) (Element, error) {
 	return elementStreamFromBuffer(buf).GetElement()
 }
 
+// shorthand for constructing an ElementStream from a byte array
 func elementStreamFromBuffer(buf []byte) *ElementStream {
 	es := NewElementStream(bufio.NewReader(bytes.NewReader(buf)), int64(len(buf)))
 	return &es
 }
 
+// valueTypematchesVR performs a quick sanity check as to whether `v` is of expected (type) for the given `vr`
 func valueTypeMatchesVR(vr string, v interface{}) bool {
 	switch vr {
 	case "AE", "AS", "CS", "DA", "DS", "DT", "IS", "LO", "PN", "SH", "TM", "UI": // LT, ST, UT do not support multiVM
@@ -99,6 +106,7 @@ func valueTypeMatchesVR(vr string, v interface{}) bool {
 ===============================================================================
 */
 
+// TestParseValidFile tests that, given a valid DICOM input, the parser will correctly parse embedded elements
 func TestParseValidFile(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(testDataDirectory, "TCIA", "1.3.6.1.4.1.14519.5.2.1.2744.7002.251446451370536632612663178782.dcm")
@@ -154,6 +162,8 @@ func TestIssue6(t *testing.T) {
 	}
 }
 
+// TestParseFileWIthZeroElementLength tests that the parser can accept a file containing an embedded
+// element with a defined length of zero
 func TestParseFileWithZeroElementLength(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(testDataDirectory, "synthetic", "ZeroElementLength.dcm")
@@ -176,6 +186,7 @@ func TestParseFileWithZeroElementLength(t *testing.T) {
 	File Parsing: Invalid DICOMs
 ===============================================================================
 */
+//TestParsecorruptDicoms tests that, given corrupted inputs, the parser will fail in an controlled manner
 func TestParseCorruptDicoms(t *testing.T) {
 	t.Parallel()
 	// attempt to parse corrupt dicoms
@@ -200,7 +211,7 @@ func TestParseCorruptDicoms(t *testing.T) {
 ===============================================================================
 */
 
-func TestStrictMode(t *testing.T) {
+func TestStrictModeEnabled(t *testing.T) {
 	t.Parallel() // ?
 	// in strict mode, inputs with elements exceeding remaining file size should be rejected
 	StrictMode = true
@@ -211,11 +222,14 @@ func TestStrictMode(t *testing.T) {
 	default:
 		t.Fatalf(`with "StrictMode" disabled, parsing "%s" should have raised a CorruptDicomError (got %v)`, path, err)
 	}
-
+}
+func TestStrictModeDisabled(t *testing.T) {
+	t.Parallel() // ?
 	// in non strict mode, inputs with elements exceeding remaining file size should not be rejected,
 	// and should have their length adjusted.
 	StrictMode = false
-	_, err = ParseDicom(path)
+	path := filepath.Join(testDataDirectory, "synthetic", "CorruptOverflowElementLength.dcm")
+	_, err := ParseDicom(path)
 	if err != nil {
 		t.Fatalf(`with "StrictMode" disabled, parsing "%s" should not have raised an error (got %v)`, path, err)
 	}
@@ -224,9 +238,12 @@ func TestStrictMode(t *testing.T) {
 func TestGetElementWithInsufficientBytes(t *testing.T) {
 	t.Parallel()
 	testCases := [][]byte{
-		make([]byte, 0), // cannot read lower section of tag
-		make([]byte, 2), // cannot read upper section of tag
-		make([]byte, 4), // cannot read VR
+		{},                                               // cannot read lower section of tag
+		{0x00, 0x00},                                     // cannot read upper section of tag
+		{0x00, 0x00, 0x00, 0x00},                         // cannot read VR
+		{0x00, 0x08, 0x00, 0x02, 0x55, 0x54},             // 0800,0200,UT
+		{0x00, 0x08, 0x00, 0x02, 0x55, 0x54, 0x00, 0x00}, // 0800,0200,UT,{0x00,0x00}
+		{0x00, 0x08, 0x00, 0x02, 0x43, 0x53},             // 0800,0200,CS
 	}
 	for _, buf := range testCases {
 		_, err := elementFromBuffer(buf)
@@ -240,13 +257,28 @@ func TestGetElementWithInsufficientBytes(t *testing.T) {
 	}
 }
 
+func TestImplicitVRVRLengthMissing(t *testing.T) {
+	t.Parallel()
+	buf := []byte{0x00, 0x08, 0x00, 0x02} // 0800,0200,UT
+	es := elementStreamFromBuffer(buf)
+	es.SetTransferSyntax("1.2.840.10008.1.2") // ImplicitVR
+	_, err := es.GetElement()
+	if errValue, ok := err.(*CorruptElement); ok {
+		if !strings.Contains(errValue.Error(), "would exceed") {
+			t.Fatalf(`should have contained detail containing "would exceed" (got %s)`, errValue.Error())
+		}
+	} else {
+		t.Fatalf(`should have raised a CorruptElementError (got %v)`, err)
+	}
+}
+
 /*
 ===============================================================================
 	Element Parsing: VRs
 ===============================================================================
 */
 
-// TestParseSQ attempts to parse CS
+// TestParseCS attempts to parse CS
 func TestParseCS(t *testing.T) {
 	t.Parallel()
 	element, err := elementFromBuffer(validCSElementBytes)

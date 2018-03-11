@@ -43,6 +43,7 @@ type CorruptDicom struct {
 	error
 }
 
+// InsufficientBytes is an error representing that there are not enough bytes left in a buffer
 type InsufficientBytes struct {
 	error
 }
@@ -120,7 +121,13 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 	tagUint32 := (uint32(lower) << 16) | uint32(upper)
 	tag, _ := LookupTag(tagUint32)
 	element.DictEntry = tag
-	if !elementStream.TransferSyntax.Encoding.ImplicitVR { // if explicit, read VR from buffer
+	if elementStream.TransferSyntax.Encoding.ImplicitVR {
+		// implicit VR -- all VR length definitions are 32 bits
+		element.ValueLength, err = elementStream.getUint32()
+		if err != nil {
+			return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
+		}
+	} else {
 		VRbytes, err := elementStream.getBytes(2)
 		if err != nil {
 			return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
@@ -147,12 +154,6 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 				return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
 			}
 			element.ValueLength = uint32(length)
-		}
-	} else {
-		// implicit VR -- all VR length definitions are 32 bits
-		element.ValueLength, err = elementStream.getUint32()
-		if err != nil {
-			return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
 		}
 	}
 	if element.ValueLength == 0xFFFFFFFF {

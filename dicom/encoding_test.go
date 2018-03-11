@@ -6,6 +6,7 @@ import (
 	"github.com/b71729/opendcm/dictionary"
 )
 
+// TestUnrecognisedSetFromUID tests that, given an unrecognised UID string, `SetFromUID` returns an error
 func TestUrecognisedSetFromUID(t *testing.T) {
 	t.Parallel()
 	ts := TransferSyntax{}
@@ -15,6 +16,7 @@ func TestUrecognisedSetFromUID(t *testing.T) {
 	}
 }
 
+// TestRecognisedSetFromUID tests that, given a recognised UID string, `SetFromUID` returns no error and correctly sets encoding
 func TestRecognisedSetFromUID(t *testing.T) {
 	t.Parallel()
 	ts := TransferSyntax{}
@@ -30,6 +32,7 @@ func TestRecognisedSetFromUID(t *testing.T) {
 	}
 }
 
+// TestEncodingStringRepresentation tests that the .String() method returns the expected string format
 func TestEncodingStringRepresentation(t *testing.T) {
 	t.Parallel()
 	encoding := TransferSyntaxToEncodingMap["1.2.840.10008.1.2"]
@@ -47,6 +50,7 @@ func TestEncodingStringRepresentation(t *testing.T) {
 	}
 }
 
+// TestUnrecognisedGetEncodingForTransferSyntax tests that, given an unrecognised TS, `GetEncodingForTransferSyntax` returns a default fallback.
 func TestUnrecognisedGetEncodingForTransferSyntax(t *testing.T) {
 	t.Parallel()
 	ts := TransferSyntax{UIDEntry: &dictionary.UIDEntry{UID: "1.1.1.1.1.1"}}
