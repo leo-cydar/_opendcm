@@ -13,5 +13,8 @@
 # DICOM data
 util/odcm-gend/*.xml
 
+# go-fuzz working directory
+util/fuzz/workdir/
+
 # go dep
 vendor/

@@ -14,7 +14,7 @@ Contributors are requested to note the following two points:
 It is suggested that the file names of those _DICOMs_ containing real data to follow the convention: `<<SeriesInstanceUID>>.dcm`, to allow for sensible searching of the directory. In the case that multiple _DICOMs_ are to be used for the same `SeriesInstanceUID`, please name the file as follows: `<<SeriesInstanceUID>>_<<Number/ShortTag>>.dcm`
 
 #### Synthetic data
-Any folders named `synthetic` contain synthesised data based on the contents contained within the parent folder.
+Any folders named `synthetic` contain synthesised data based on the contents contained within the parent folder. In the case of the top-level `synthetic` folder, the contents are entirely generated and not based on any external source.
 
 The contents of any files contained within a `synthetic` directory are _not_ intended to be representative of the original data, as they may for instance have been purposefully corrupted to test data parsing.
 #### Restrictions

@@ -156,19 +156,19 @@ func TestIssue6(t *testing.T) {
 	File Parsing: Invalid DICOMs
 ===============================================================================
 */
-func testParseCorruptDicoms(t *testing.T) {
+func TestParseCorruptDicoms(t *testing.T) {
 	t.Parallel()
 	// attempt to parse corrupt dicoms
 	corruptFiles := []string{
 		"CorruptOverflowElementLength.dcm",
-		"CorruptZeroElementLength.dcm",
-		"CorruptZeroElementLength.dcm",
-		"CorruptTruncated.dcm",
-		"CorruptBadTransferSyntax.dcm",
-		"CorruptMissingMetaLength.dcm",
+		// "CorruptZeroElementLength.dcm",
+		// "CorruptZeroElementLength.dcm",
+		// "CorruptTruncated.dcm",
+		// "CorruptBadTransferSyntax.dcm",
+		// "CorruptMissingMetaLength.dcm",
 	}
 	for _, file := range corruptFiles {
-		path := filepath.Join(testDataDirectory, "synthesised", file)
+		path := filepath.Join(testDataDirectory, "synthetic", file)
 		_, err := ParseDicom(path)
 		switch err.(type) {
 		case *CorruptDicom:
