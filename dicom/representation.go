@@ -210,6 +210,22 @@ func decodeContents(buffer []byte, e *Element) interface{} {
 		return decoded
 	case "IS", "DS", "TM", "DA", "DT", "UI", "CS", "AS", "AE":
 		return string(buffer)
+	case "AT":
+		if len(buffer) != 4 || len(buffer)%2 != 0 { // this should never happen, but if it does, return the original bytes
+			return buffer
+		}
+		var lower uint16
+		var upper uint16
+		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
+			lower = binary.LittleEndian.Uint16(buffer[0:2])
+			upper = binary.LittleEndian.Uint16(buffer[2:4])
+		} else {
+			lower = binary.BigEndian.Uint16(buffer[0:2])
+			upper = binary.BigEndian.Uint16(buffer[2:4])
+		}
+		tagUint32 := (uint32(lower) << 16) | uint32(upper)
+		tag := dictionary.Tag(tagUint32)
+		return tag.String()
 	case "FL": // float
 		if len(buffer) < 4 {
 			goto InsufficientBytes
