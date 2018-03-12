@@ -48,13 +48,14 @@ func main() {
 			goto usage
 		}
 	}
+	return
 usage:
 	console.Fatalf("usage: %s [%s] [flags]", baseFile, strings.Join([]string{"inspect", "reduce", "gendatadict", "createdicom"}, " / "))
 }
 
 /*
 ===============================================================================
-	Mode: Generate Data Dictionary
+    Mode: Generate Data Dictionary
 ===============================================================================
 */
 
@@ -220,39 +221,39 @@ func StartGenDataDict() {
 	console.Infof("found %d UIDs elements", len(UIDs))
 
 	// build golang string
-	outF, err := os.Create("datadict.dcm")
+	outF, err := os.Create("datadict.go")
 	check(err)
 	outCode := `// Code generated using util:gendatadict. DO NOT EDIT.
+package dictionary
 
-	package dictionary
+import "fmt"
 
-	import ("fmt")
+type Tag uint32
 
-	type Tag uint32
-
-	type DictEntry struct {
+type DictEntry struct {
 	Tag       Tag
 	NameHuman string
 	Name      string
 	VR        string
 	VM        string
 	Retired   bool
-	}
+}
 
-	type UIDEntry struct {
+type UIDEntry struct {
 	UID       string
 	Type      string
 	NameHuman string
-	}
+}
 
-	func (t Tag) String() string {
+func (t Tag) String() string {
 	upper := uint16(t >> 16)
 	lower := uint16(t)
 	return fmt.Sprintf("(%04X,%04X)", upper, lower)
-	}
-	// DicomDictionary provides a mapping between uint32 representation of a DICOM Tag and a DictEntry pointer.
-	var DicomDictionary = map[uint32]*DictEntry{
-	`
+}
+
+// DicomDictionary provides a mapping between uint32 representation of a DICOM Tag and a DictEntry pointer.
+var DicomDictionary = map[uint32]*DictEntry{
+`
 	outCode += "    // File Meta Elements\n"
 	for _, v := range fileMetaElements {
 		outCode += fmt.Sprintf(`    0x%08X: {Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", Retired: %v},`, uint32(v.Tag), uint32(v.Tag), v.Name, v.NameHuman, v.VR, v.Retired) + "\n"
@@ -270,15 +271,15 @@ func StartGenDataDict() {
 
 	outCode += `}
 
-	// UIDs
-	var UIDDictionary = map[string]*UIDEntry{
-	`
+// UIDs
+var UIDDictionary = map[string]*UIDEntry{
+    `
 	for _, v := range UIDs {
 		outCode += fmt.Sprintf(`    "%s": {UID: "%s", Type: "%s", NameHuman: "%s"},`, v.UID, v.UID, v.Type, v.NameHuman) + "\n"
 	}
 
 	outCode += `}
-	`
+    `
 	// write to disk
 	_, err = outF.WriteString(outCode)
 	check(err)
@@ -287,7 +288,7 @@ func StartGenDataDict() {
 
 /*
 ===============================================================================
-	Mode: Create DICOM File
+    Mode: Create DICOM File
 ===============================================================================
 */
 
@@ -387,7 +388,7 @@ func writeMeta() []byte {
 	check(err)
 	buffer = append(buffer, elementBytes...)
 
-	// (0002,0013)	Implementation Version Name	opendcm-0.1
+	// (0002,0013)    Implementation Version Name    opendcm-0.1
 	elementBytes, err = generateElement("0002,0013", []byte(fmt.Sprintf("opendcm-%s", opendcm.OpenDCMVersion)), "SH")
 	check(err)
 	buffer = append(buffer, elementBytes...)
@@ -446,7 +447,7 @@ func StartCreateDicom() {
 
 /*
 ===============================================================================
-	Mode: Reduce DICOM Directory
+    Mode: Reduce DICOM Directory
 ===============================================================================
 */
 
@@ -530,7 +531,7 @@ func StartReduce() {
 
 /*
 ===============================================================================
-	Mode: Inspect DICOM File
+    Mode: Inspect DICOM File
 ===============================================================================
 */
 

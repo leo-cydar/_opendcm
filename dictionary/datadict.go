@@ -1,5 +1,4 @@
 // Code generated using util:gendatadict. DO NOT EDIT.
-
 package dictionary
 
 import "fmt"
@@ -26,6 +25,7 @@ func (t Tag) String() string {
 	lower := uint16(t)
 	return fmt.Sprintf("(%04X,%04X)", upper, lower)
 }
+
 // DicomDictionary provides a mapping between uint32 representation of a DICOM Tag and a DictEntry pointer.
 var DicomDictionary = map[uint32]*DictEntry{
     // File Meta Elements
@@ -4233,7 +4233,7 @@ var DicomDictionary = map[uint32]*DictEntry{
 
 // UIDs
 var UIDDictionary = map[string]*UIDEntry{
-    "1.2.840.10008.1.1": {UID: "1.2.840.10008.1.1", Type: "SOP Class", NameHuman: "Verification SOP Class"},
+        "1.2.840.10008.1.1": {UID: "1.2.840.10008.1.1", Type: "SOP Class", NameHuman: "Verification SOP Class"},
     "1.2.840.10008.1.2": {UID: "1.2.840.10008.1.2", Type: "Transfer Syntax", NameHuman: "Implicit VR Little Endian: Default Transfer Syntax for DICOM"},
     "1.2.840.10008.1.2.1": {UID: "1.2.840.10008.1.2.1", Type: "Transfer Syntax", NameHuman: "Explicit VR Little Endian"},
     "1.2.840.10008.1.2.1.99": {UID: "1.2.840.10008.1.2.1.99", Type: "Transfer Syntax", NameHuman: "Deflated Explicit VR Little Endian"},
@@ -4633,3 +4633,4 @@ var UIDDictionary = map[string]*UIDEntry{
     "1.2.840.10008.15.0.4.8": {UID: "1.2.840.10008.15.0.4.8", Type: "LDAP OID", NameHuman: "dicom Transfer Capability"},
     "1.2.840.10008.15.1.1": {UID: "1.2.840.10008.15.1.1", Type: "Synchronization Frame of Reference", NameHuman: "Universal Coordinated Time"},
 }
+    
