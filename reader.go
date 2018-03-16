@@ -47,61 +47,25 @@ var StrictMode = false
 */
 
 type ReaderPool struct {
-	reader *bufio.Reader
+	pool *sync.Pool
 }
 
 var Nalloc = 0
-var Nused = 0
-var ReaderPool256k = &sync.Pool{
+
+var readerPool = ReaderPool{pool: &sync.Pool{
 	New: func() interface{} {
 		Nalloc++
-		return bufio.NewReaderSize(nil, 256*1024)
+		return bufio.NewReaderSize(nil, DicomReadBufferSize)
 	},
-}
+}}
 
-var readerPool512k = &sync.Pool{
-	New: func() interface{} {
-		return bufio.NewReaderSize(nil, 512*1024)
-	},
-}
-
-var readerPool2mb = &sync.Pool{
-	New: func() interface{} {
-		return bufio.NewReaderSize(nil, 2*1024*1024)
-	},
-}
-
-func Get256k(src io.Reader) (r *bufio.Reader) {
-	Nused++
-	r = ReaderPool256k.Get().(*bufio.Reader)
+func (rp *ReaderPool) Get(src io.Reader) (r *bufio.Reader) {
+	r = rp.pool.Get().(*bufio.Reader)
 	r.Reset(src)
-	return r
+	return
 }
-
-func Put256k(r *bufio.Reader) {
-	ReaderPool256k.Put(r)
-}
-
-func Get512k(src io.Reader) (r *bufio.Reader) {
-	Nused++
-	r = readerPool512k.Get().(*bufio.Reader)
-	r.Reset(src)
-	return r
-}
-
-func Put512k(r *bufio.Reader) {
-	readerPool512k.Put(r)
-}
-
-func Get2mb(src io.Reader) (r *bufio.Reader) {
-	Nused++
-	r = readerPool2mb.Get().(*bufio.Reader)
-	r.Reset(src)
-	return r
-}
-
-func Put2mb(r *bufio.Reader) {
-	readerPool2mb.Put(r)
+func (rp *ReaderPool) Put(r *bufio.Reader) {
+	rp.pool.Put(r)
 }
 
 // Dicom provides a link between components that make up a parsed DICOM file
@@ -141,6 +105,13 @@ type ElementStream struct {
 	readerSize     int64
 	TransferSyntax TransferSyntax
 	CharacterSet   *CharacterSet
+	buffers
+}
+
+type buffers struct {
+	ui16b [2]byte
+	ui32b [4]byte
+	nread int
 }
 
 // TransferSyntax provides a link between dictionary `UIDEntry` and encoding (byteorder, implicit/explicit VR)
@@ -203,7 +174,7 @@ type CorruptElement struct {
 	error
 }
 
-// CorruptElementStream is an error representing that the `ElementStream` encountered a general problem
+// CorruptElementStream is an error representing that the `es` encountered a general problem
 type CorruptElementStream struct {
 	error
 }
@@ -385,7 +356,7 @@ func LookupTag(t uint32) (*dictionary.DictEntry, bool) {
 	val, ok := dictionary.DicomDictionary[t]
 	if !ok {
 		tag := dictionary.Tag(t)
-		name := fmt.Sprintf("Unknown%s", tag)
+		name := "Unknown" + tag.String()
 		return &dictionary.DictEntry{Tag: tag, Name: name, NameHuman: name, VR: "UN", VM: "1", Retired: false}, false
 	}
 	return val, ok
@@ -620,37 +591,37 @@ func (e Element) ValueBytes() []byte {
 
 /*
 ===============================================================================
-    `ElementStream`: Element Parser
+    `es`: Element Parser
 ===============================================================================
 */
 
 // GetElement yields an `Element` from the active stream, and an `error` if something went wrong.
-func (elementStream *ElementStream) GetElement() (Element, error) {
+func (es *ElementStream) GetElement() (Element, error) {
 	element := Element{}
-	element.sourceElementStream = elementStream
-	element.sourceElementStream = elementStream
+	element.sourceElementStream = es
+	element.sourceElementStream = es
 
-	startBytePos := elementStream.GetPosition()
+	startBytePos := es.GetPosition()
 	element.FileOffsetStart = startBytePos
-	lower, err := elementStream.getUint16()
+	lower, err := es.getUint16()
 	if err != nil {
 		return element, CorruptElementError("GetElement(): %v", err)
 	}
-	upper, err := elementStream.getUint16()
+	upper, err := es.getUint16()
 	if err != nil {
 		return element, CorruptElementError("GetElement(): %v", err)
 	}
 	tagUint32 := (uint32(lower) << 16) | uint32(upper)
 	tag, _ := LookupTag(tagUint32)
 	element.DictEntry = tag
-	if elementStream.TransferSyntax.Encoding.ImplicitVR {
+	if es.TransferSyntax.Encoding.ImplicitVR {
 		// implicit VR -- all VR length definitions are 32 bits
-		element.ValueLength, err = elementStream.getUint32()
+		element.ValueLength, err = es.getUint32()
 		if err != nil {
 			return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
 		}
 	} else {
-		VRbytes, err := elementStream.getBytes(2)
+		VRbytes, err := es.getBytes(2)
 		if err != nil {
 			return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
 		}
@@ -661,16 +632,16 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 		// issue #6: use *source* VR as basis for deciding whether to skip / size of length integer.
 		// in explicit VR mode, if the VR is OB, OW, SQ, UN or UT, skip two bytes and read as uint32, else uint16.
 		if VRstring == "OB" || VRstring == "OW" || VRstring == "SQ" || VRstring == "UN" || VRstring == "UT" {
-			err := elementStream.skipBytes(2)
+			err := es.skipBytes(2)
 			if err != nil {
 				return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
 			}
-			element.ValueLength, err = elementStream.getUint32()
+			element.ValueLength, err = es.getUint32()
 			if err != nil {
 				return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
 			}
 		} else {
-			length, err := elementStream.getUint16()
+			length, err := es.getUint16()
 			if err != nil {
 				return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
 			}
@@ -678,21 +649,20 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 		}
 	}
 	if element.ValueLength == 0xFFFFFFFF {
-		var parseElements = (element.VR == "SQ")
-		items, err := elementStream.getSequence(parseElements)
+		items, err := es.getSequence(element.VR == "SQ")
 		if err != nil {
 			return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
 		}
 		element.Items = items
 	} else {
 		// issue #4: Parser allows for element value length to exceed file size
-		if int64(element.ValueLength) > elementStream.readerSize {
-			return element, CorruptElementError("GetElement(): value length (%d) exceeds file size (%d)", element.ValueLength, elementStream.readerSize)
+		if int64(element.ValueLength) > es.readerSize {
+			return element, CorruptElementError("GetElement(): value length (%d) exceeds file size (%d)", element.ValueLength, es.readerSize)
 		}
 		// string padding: should remove trailing+leading 0x00 / 0x20 bytes (see: http://dicom.nema.org/dicom/2013/output/chtml/part05/sect_6.2.html)
 		// NOTE: some vendors pad with 0x20, some 0x00 -- seems to contradict NEMA spec. Let's account for both then:
 		if element.ValueLength > 0 {
-			valuebuf, err := elementStream.getBytes(uint(element.ValueLength))
+			valuebuf, err := es.getBytes(uint(element.ValueLength))
 			if err != nil {
 				switch err.(type) {
 				case InsufficientBytes:
@@ -703,10 +673,10 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 					log.Warn().
 						Str("tag", element.Tag.String()).
 						Uint32("from", element.ValueLength).
-						Int64("to", elementStream.GetRemainingBytes()).
+						Int64("to", es.GetRemainingBytes()).
 						Msg("element value length truncated due to reaching end of the file. use with caution.")
-					element.ValueLength = uint32(elementStream.GetRemainingBytes())
-					valuebuf, err = elementStream.getBytes(uint(element.ValueLength))
+					element.ValueLength = uint32(es.GetRemainingBytes())
+					valuebuf, err = es.getBytes(uint(element.ValueLength))
 					if err != nil {
 						return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
 					}
@@ -735,25 +705,25 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 		}
 	}
 
-	element.ByteLengthTotal = (elementStream.GetPosition() - startBytePos)
+	element.ByteLengthTotal = (es.GetPosition() - startBytePos)
 	return element, nil
 }
 
 // getSequence parses a sequence of "unlimited length" from the bytestream
-func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, error) {
+func (es *ElementStream) getSequence(parseElements bool) ([]Item, error) {
 	var items []Item
 	for {
-		lower, err := elementStream.getUint16()
+		lower, err := es.getUint16()
 		if err != nil {
 			return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
 		}
-		upper, err := elementStream.getUint16()
+		upper, err := es.getUint16()
 		if err != nil {
 			return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
 		}
 		tagUint32 := (uint32(lower) << 16) | uint32(upper)
 		if tagUint32 == 0xFFFEE0DD {
-			err := elementStream.skipBytes(4)
+			err := es.skipBytes(4)
 			if err != nil {
 				return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
 			}
@@ -762,7 +732,7 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 		if tagUint32 != 0xFFFEE000 {
 			return items, CorruptElementStreamError("getSequence(%v): 0x%08X != 0xFFFEE000", parseElements, tagUint32)
 		}
-		length, err := elementStream.getUint32()
+		length, err := es.getUint32()
 		if err != nil {
 			return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
 		}
@@ -772,7 +742,7 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 		if length == 0xFFFFFFFF { // unlimited length item
 			// find next FFFE, E00D = data for item ends
 			var delimitationItemBytes []byte
-			if elementStream.TransferSyntax.Encoding.LittleEndian {
+			if es.TransferSyntax.Encoding.LittleEndian {
 				delimitationItemBytes = []byte{0xFE, 0xFF, 0x0D, 0xE0}
 			} else {
 				delimitationItemBytes = []byte{0xFF, 0xFE, 0xE0, 0x0D}
@@ -780,12 +750,12 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 
 			for {
 				// try to grab an element according to current TransferSyntax
-				e, err := elementStream.GetElement()
+				e, err := es.GetElement()
 				if err != nil {
 					return items, CorruptDicomError("getSequence(%v): %v", parseElements, err)
 				}
 				elements[uint32(e.Tag)] = e
-				check, err := elementStream.reader.Peek(4)
+				check, err := es.reader.Peek(4)
 				if err != nil {
 					return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
 				}
@@ -796,7 +766,7 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 			}
 
 			// now we must skip eight bytes (delimitation item + 0x00{4}) (see: NEMA Table 7.5-3)
-			err = elementStream.skipBytes(8)
+			err = es.skipBytes(8)
 			if err != nil {
 				return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
 			}
@@ -812,14 +782,14 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 					   This condition accounts for this possibility.
 					*/
 				}
-				element, err := elementStream.GetElement()
+				element, err := es.GetElement()
 				if err != nil {
 					return items, CorruptDicomError("getSequence(%v): %v", parseElements, err)
 				}
 				elements[uint32(element.Tag)] = element
 
 			} else {
-				valuebuffer, err := elementStream.getBytes(uint(length))
+				valuebuffer, err := es.getBytes(uint(length))
 				if err != nil {
 					return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
 				}
@@ -833,95 +803,94 @@ func (elementStream *ElementStream) getSequence(parseElements bool) ([]Item, err
 	return items, nil
 }
 
-func (elementStream *ElementStream) skipBytes(num int) error {
+func (es *ElementStream) skipBytes(num int) (err error) {
 	if num == 0 {
 		return nil
 	}
-	if numRemaining := elementStream.GetRemainingBytes(); numRemaining < int64(num) {
+	if numRemaining := es.GetRemainingBytes(); numRemaining < int64(num) {
 		return CorruptElementStreamError("skipBytes(%d): would exceed buffer size (%d bytes)", num, numRemaining)
 	}
-	nseek, err := elementStream.reader.Discard(num)
+	es.nread, err = es.reader.Discard(num)
 	if err != nil {
 		return CorruptElementStreamError("skipBytes(%d): %v", num, err)
 	}
-	elementStream.readerPos += int64(nseek)
-	if nseek < num {
-		return CorruptElementStreamError("skipBytes(%d): nseek = %d", num, nseek)
+	es.readerPos += int64(es.nread)
+	if es.nread < num {
+		return CorruptElementStreamError("skipBytes(%d): nseek = %d", num, es.nread)
 	}
 	return nil
 }
 
 // GetPosition returns the current buffer position
-func (elementStream *ElementStream) GetPosition() (pos int64) {
-	pos = elementStream.readerPos
-	return
+func (es *ElementStream) GetPosition() int64 {
+	return es.readerPos
 }
 
 // GetRemainingBytes returns the number of remaining unread bytes
-func (elementStream *ElementStream) GetRemainingBytes() (num int64) {
-	num = elementStream.readerSize - elementStream.readerPos
-	return
+func (es *ElementStream) GetRemainingBytes() int64 {
+	return es.readerSize - es.readerPos
 }
 
-func (elementStream *ElementStream) getUint16() (uint16, error) {
-	if numRemaining := elementStream.GetRemainingBytes(); numRemaining < 2 {
+func (es *ElementStream) getUint16() (res uint16, err error) {
+	if numRemaining := es.GetRemainingBytes(); numRemaining < 2 {
 		return 0, CorruptElementStreamError("getUint16(): would exceed buffer size (%d bytes)", numRemaining)
 	}
-	buf := make([]byte, 2)
-	nread, err := io.ReadFull(elementStream.reader, buf)
+	es.nread, err = io.ReadFull(es.reader, es.ui16b[:])
 	if err != nil {
 		return 0, CorruptElementStreamError("getUint16(): %v", err)
 	}
-	elementStream.readerPos += int64(nread)
-	if nread != 2 {
-		return 0, CorruptElementStreamError("getUint16(): nread = %d (!= 2)", nread)
+	es.readerPos += int64(es.nread)
+	if es.nread != 2 {
+		return 0, CorruptElementStreamError("getUint16(): nread = %d (!= 2)", es.nread)
 	}
-	if elementStream.TransferSyntax.Encoding.LittleEndian {
-		return binary.LittleEndian.Uint16(buf), nil
+	if es.TransferSyntax.Encoding.LittleEndian {
+		res = binary.LittleEndian.Uint16(es.ui16b[:])
+	} else {
+		res = binary.BigEndian.Uint16(es.ui16b[:])
 	}
-	return binary.BigEndian.Uint16(buf), nil
+	return
 }
 
-func (elementStream *ElementStream) getUint32() (uint32, error) {
-	if numRemaining := elementStream.GetRemainingBytes(); numRemaining < 4 {
+func (es *ElementStream) getUint32() (res uint32, err error) {
+	if numRemaining := es.GetRemainingBytes(); numRemaining < 4 {
 		return 0, CorruptElementStreamError("getUint32(): would exceed buffer size (%d bytes)", numRemaining)
 	}
-	buf := make([]byte, 4)
-	nread, err := io.ReadFull(elementStream.reader, buf)
+	es.nread, err = io.ReadFull(es.reader, es.ui32b[:])
 	if err != nil {
 		return 0, CorruptElementStreamError("getUint32(): %v", err)
 	}
-	elementStream.readerPos += int64(nread)
-	if nread != 4 {
-		return 0, CorruptElementStreamError("getUint32(): nread = %d (!= 4)", nread)
+	es.readerPos += int64(es.nread)
+	if es.nread != 4 {
+		return 0, CorruptElementStreamError("getUint32(): nread = %d (!= 4)", es.nread)
 	}
-
-	if elementStream.TransferSyntax.Encoding.LittleEndian {
-		return binary.LittleEndian.Uint32(buf), nil
+	if es.TransferSyntax.Encoding.LittleEndian {
+		res = binary.LittleEndian.Uint32(es.ui32b[:])
+	} else {
+		res = binary.BigEndian.Uint32(es.ui32b[:])
 	}
-	return binary.BigEndian.Uint32(buf), nil
+	return
 }
 
-func (elementStream *ElementStream) getBytes(num uint) ([]byte, error) {
+func (es *ElementStream) getBytes(num uint) ([]byte, error) {
 	if num == 0 {
 		return []byte{}, nil
 	}
-	if num > uint(elementStream.GetRemainingBytes()) {
-		return nil, InsufficientBytes{fmt.Errorf("getBytes(%d): (offset 0x%X): would exceed buffer size (%d bytes)", num, elementStream.GetPosition(), elementStream.GetRemainingBytes())}
+	if num > uint(es.GetRemainingBytes()) {
+		return nil, InsufficientBytes{fmt.Errorf("getBytes(%d): (offset 0x%X): would exceed buffer size (%d bytes)", num, es.GetPosition(), es.GetRemainingBytes())}
 	}
 	buf := make([]byte, num)
-	nread, err := io.ReadFull(elementStream.reader, buf)
+	nread, err := io.ReadFull(es.reader, buf)
 	if err != nil {
 		return buf, CorruptElementStreamError("getBytes(%d): %v", num, err)
 	}
-	elementStream.readerPos += int64(nread)
+	es.readerPos += int64(nread)
 	if uint(nread) != num {
 		return buf, CorruptElementStreamError("getBytes(%d): nread = %d (!= %d)", num, nread, num)
 	}
 	return buf, nil
 }
 
-// NewElementStream sets up a new `ElementStream`
+// NewElementStream sets up a new `es`
 func NewElementStream(readerPtr *bufio.Reader, readerSize int64) (stream ElementStream) {
 	stream = ElementStream{TransferSyntax: TransferSyntax{}}
 	stream.CharacterSet = CharacterSetMap["Default"]
@@ -931,10 +900,10 @@ func NewElementStream(readerPtr *bufio.Reader, readerSize int64) (stream Element
 	return
 }
 
-// SetTransferSyntax sets the `ElementStream`s TransferSyntax according to uid string
-func (elementStream *ElementStream) SetTransferSyntax(transferSyntaxUID string) {
-	elementStream.TransferSyntax.SetFromUID(transferSyntaxUID)
-	elementStream.TransferSyntax.Encoding = GetEncodingForTransferSyntax(elementStream.TransferSyntax)
+// SetTransferSyntax sets the `es`s TransferSyntax according to uid string
+func (es *ElementStream) SetTransferSyntax(transferSyntaxUID string) {
+	es.TransferSyntax.SetFromUID(transferSyntaxUID)
+	es.TransferSyntax.Encoding = GetEncodingForTransferSyntax(es.TransferSyntax)
 }
 
 /*
@@ -1039,23 +1008,10 @@ func ParseDicom(path string) (Dicom, error) {
 		return dcm, err
 	}
 	fileSize := stat.Size()
-
-	if fileSize < 256*1024 {
-		dcm.reader = Get256k(f)
-		defer func() {
-			Put256k(dcm.reader)
-		}()
-	} else if fileSize < 512*1024 {
-		dcm.reader = Get512k(f)
-		defer func() {
-			Put512k(dcm.reader)
-		}()
-	} else {
-		dcm.reader = Get2mb(f)
-		defer func() {
-			Put2mb(dcm.reader)
-		}()
-	}
+	dcm.reader = readerPool.Get(f)
+	defer func() {
+		readerPool.Put(dcm.reader)
+	}()
 	dcm.elementStream = NewElementStream(dcm.reader, fileSize)
 	if err := dcm.crawlMeta(); err != nil {
 		switch err.(type) {
@@ -1075,22 +1031,11 @@ func ParseDicom(path string) (Dicom, error) {
 // ParseFromBytes parses a dicom from a bytestream
 func ParseFromBytes(source []byte) (Dicom, error) {
 	dcm := Dicom{}
-	if len(source) < 256*1024 {
-		dcm.reader = Get256k(bytes.NewReader(source))
-		defer func() {
-			Put256k(dcm.reader)
-		}()
-	} else if len(source) < 512*1024 {
-		dcm.reader = Get512k(bytes.NewReader(source))
-		defer func() {
-			Put512k(dcm.reader)
-		}()
-	} else {
-		dcm.reader = Get2mb(bytes.NewReader(source))
-		defer func() {
-			Put2mb(dcm.reader)
-		}()
-	}
+
+	dcm.reader = readerPool.Get(bytes.NewReader(source))
+	defer func() {
+		readerPool.Put(dcm.reader)
+	}()
 	dcm.elementStream = NewElementStream(dcm.reader, int64(len(source)))
 	dcm.Elements = make(map[uint32]Element)
 

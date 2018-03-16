@@ -8,9 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -80,21 +83,28 @@ func StartSimulate() {
 	opendcm.ConcurrentlyWalkDir(os.Args[2], func(file string) {
 		files = append(files, file)
 	})
-	//flen := len(files)
+	flen := len(files)
 	ntotal := 0
+	start := time.Now()
 	go func() {
 		for {
-			log.Debug().
-				Int("alloc", opendcm.Nalloc).
-				Int("used", opendcm.Nused).
-				Msg("Running...")
 			time.Sleep(time.Second * 3)
+
+			elapsed := time.Now().Sub(start)
+			log.Debug().
+				Float64("apd", math.Round(float64(opendcm.Nalloc)/elapsed.Seconds())).
+				Float64("dps", math.Round(float64(ntotal)/elapsed.Seconds())).
+				Msg("Running...")
+
+			var memStats runtime.MemStats
+			runtime.ReadMemStats(&memStats)
+
+			log.Debug().Msgf("memory: %d kB / %d kB", memStats.Alloc/1024, memStats.Sys/1024)
 		}
 	}()
 	for {
-		//n := rand.Intn(flen)
-		opendcm.ParseDicom(files[0])
-		time.Sleep(time.Millisecond * 1)
+		n := rand.Intn(flen)
+		opendcm.ParseDicom(files[n])
 		ntotal++
 	}
 }

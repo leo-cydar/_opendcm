@@ -396,7 +396,7 @@ func TestUnrecognisedGetEncodingForTransferSyntax(t *testing.T) {
 }
 
 func BenchmarkParseFromBuffer(b *testing.B) {
-	f, err := os.Open(filepath.Join("testdata", "TCIA", "1.3.12.2.1107.5.1.4.1001.30000013072513125762500009613.dcm"))
+	f, err := os.Open(filepath.Join("testdata", "TCIA", "1.3.6.1.4.1.14519.5.2.1.2744.7002.251446451370536632612663178782.dcm"))
 	if err != nil {
 		panic(err)
 	}
@@ -406,12 +406,15 @@ func BenchmarkParseFromBuffer(b *testing.B) {
 	}
 	data := make([]byte, stat.Size())
 	io.ReadFull(f, data)
-	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, err := ParseFromBytes(data)
-		if err != nil {
-			b.Fatalf("error parsing dicom: %v", err)
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, err := ParseFromBytes(data)
+			if err != nil {
+				b.Fatalf("error parsing dicom: %v", err)
+			}
 		}
-	}
+	})
+
 }
