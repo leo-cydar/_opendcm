@@ -3,6 +3,7 @@ package opendcm
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -157,7 +158,7 @@ func TestIssue6(t *testing.T) {
 	}
 
 	if val.(uint16) != 2766 {
-		t.Fatalf("(0028,0107) did not return expected value of 2766")
+		t.Fatalf("(0028,0107) returned %d (!= 2766)", val.(uint16))
 	}
 }
 
@@ -369,14 +370,14 @@ func TestRecognisedSetFromUID(t *testing.T) {
 // TestEncodingStringRepresentation tests that the .String() method returns the expected string format
 func TestEncodingStringRepresentation(t *testing.T) {
 	t.Parallel()
-	encoding := TransferSyntaxToEncodingMap["1.2.840.10008.1.2"]
+	encoding := transferSyntaxToEncodingMap["1.2.840.10008.1.2"]
 	str := encoding.String()
 	expected := "ImplicitVR + LittleEndian"
 	if str != expected {
 		t.Fatalf(`got "%s" (!= "%s")`, str, expected)
 	}
 
-	encoding = TransferSyntaxToEncodingMap["1.2.840.10008.1.2.2"]
+	encoding = transferSyntaxToEncodingMap["1.2.840.10008.1.2.2"]
 	str = encoding.String()
 	expected = "ExplicitVR + BigEndian"
 	if str != expected {
@@ -389,7 +390,28 @@ func TestUnrecognisedGetEncodingForTransferSyntax(t *testing.T) {
 	t.Parallel()
 	ts := TransferSyntax{UIDEntry: &dictionary.UIDEntry{UID: "1.1.1.1.1.1"}}
 	encoding := GetEncodingForTransferSyntax(ts)
-	if encoding != TransferSyntaxToEncodingMap["1.2.840.10008.1.2.1"] {
+	if encoding != transferSyntaxToEncodingMap["1.2.840.10008.1.2.1"] {
 		t.Fatalf("encoding did not match expected encoding for unrecognised TS")
+	}
+}
+
+func BenchmarkParseFromBuffer(b *testing.B) {
+	f, err := os.Open(filepath.Join("testdata", "TCIA", "1.3.12.2.1107.5.1.4.1001.30000013072513125762500009613.dcm"))
+	if err != nil {
+		panic(err)
+	}
+	stat, err := f.Stat()
+	if err != nil {
+		panic(err)
+	}
+	data := make([]byte, stat.Size())
+	io.ReadFull(f, data)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := ParseFromBytes(data)
+		if err != nil {
+			b.Fatalf("error parsing dicom: %v", err)
+		}
 	}
 }

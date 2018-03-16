@@ -7,9 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 // OpenDCMRootUID contains the official designated root UID prefox for OpenDCM
@@ -51,43 +48,6 @@ func ConcurrentlyWalkDir(dirPath string, onFile func(file string)) error {
 		}(filePath)
 	}
 	return nil
-}
-
-func normaliseWriters(writers ...zapcore.WriteSyncer) zapcore.WriteSyncer {
-	if len(writers) == 1 {
-		return writers[0]
-	}
-	return zapcore.NewMultiWriteSyncer(writers...)
-}
-
-// NewJSONLogger creates a `zap.SugaredLogger` configured for JSON output to `writers`
-func NewJSONLogger(writers ...zapcore.WriteSyncer) *zap.SugaredLogger {
-	writer := normaliseWriters(writers...)
-	encoderCfg := zapcore.EncoderConfig{
-		MessageKey:     "msg",
-		LevelKey:       "level",
-		NameKey:        "logger",
-		EncodeLevel:    zapcore.LowercaseLevelEncoder,
-		EncodeTime:     zapcore.ISO8601TimeEncoder,
-		EncodeDuration: zapcore.StringDurationEncoder,
-	}
-	core := zapcore.NewCore(zapcore.NewJSONEncoder(encoderCfg), writer, zapcore.DebugLevel)
-	return zap.New(core).Sugar()
-}
-
-// NewConsoleLogger creates a `zap.SugaredLogger` configured for human-readable output to `writers`
-func NewConsoleLogger(writers ...zapcore.WriteSyncer) *zap.SugaredLogger {
-	writer := normaliseWriters(writers...)
-	encoderCfg := zapcore.EncoderConfig{
-		MessageKey:     "msg",
-		LevelKey:       "level",
-		NameKey:        "logger",
-		EncodeLevel:    zapcore.LowercaseColorLevelEncoder,
-		EncodeTime:     zapcore.ISO8601TimeEncoder,
-		EncodeDuration: zapcore.StringDurationEncoder,
-	}
-	core := zapcore.NewCore(zapcore.NewConsoleEncoder(encoderCfg), writer, zapcore.DebugLevel)
-	return zap.New(core).Sugar()
 }
 
 // GetImplementationUID generates a DICOM implementation UID from OpenDCMRootUID and OpenDCMVersion

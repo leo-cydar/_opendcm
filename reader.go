@@ -10,8 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 
 	"github.com/b71729/opendcm/dictionary"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/encoding/japanese"
@@ -38,13 +40,69 @@ const DicomReadBufferSize = 2 * 1024 * 1024 // 2MB
 // StrictMode controls whether the parser operates in a restricted manner, rejecting potentially corrupt data.
 var StrictMode = false
 
-var console = NewConsoleLogger(os.Stderr)
-
 /*
 ===============================================================================
     Data Types
 ===============================================================================
 */
+
+type ReaderPool struct {
+	reader *bufio.Reader
+}
+
+var Nalloc = 0
+var Nused = 0
+var ReaderPool256k = &sync.Pool{
+	New: func() interface{} {
+		Nalloc++
+		return bufio.NewReaderSize(nil, 256*1024)
+	},
+}
+
+var readerPool512k = &sync.Pool{
+	New: func() interface{} {
+		return bufio.NewReaderSize(nil, 512*1024)
+	},
+}
+
+var readerPool2mb = &sync.Pool{
+	New: func() interface{} {
+		return bufio.NewReaderSize(nil, 2*1024*1024)
+	},
+}
+
+func Get256k(src io.Reader) (r *bufio.Reader) {
+	Nused++
+	r = ReaderPool256k.Get().(*bufio.Reader)
+	r.Reset(src)
+	return r
+}
+
+func Put256k(r *bufio.Reader) {
+	ReaderPool256k.Put(r)
+}
+
+func Get512k(src io.Reader) (r *bufio.Reader) {
+	Nused++
+	r = readerPool512k.Get().(*bufio.Reader)
+	r.Reset(src)
+	return r
+}
+
+func Put512k(r *bufio.Reader) {
+	readerPool512k.Put(r)
+}
+
+func Get2mb(src io.Reader) (r *bufio.Reader) {
+	Nused++
+	r = readerPool2mb.Get().(*bufio.Reader)
+	r.Reset(src)
+	return r
+}
+
+func Put2mb(r *bufio.Reader) {
+	readerPool2mb.Put(r)
+}
 
 // Dicom provides a link between components that make up a parsed DICOM file
 type Dicom struct {
@@ -62,7 +120,7 @@ type Element struct {
 	ValueLength         uint32
 	ByteLengthTotal     int64
 	FileOffsetStart     int64
-	value               *bytes.Buffer
+	value               []byte
 	sourceElementStream *ElementStream
 	Items               []Item
 }
@@ -91,7 +149,7 @@ type TransferSyntax struct {
 	Encoding *Encoding
 }
 
-// Encoding represents the expected encoding of dicom attributes. See TransferSyntaxToEncodingMap.
+// Encoding represents the expected encoding of dicom attributes. See transferSyntaxToEncodingMap.
 type Encoding struct {
 	ImplicitVR   bool
 	LittleEndian bool
@@ -208,9 +266,9 @@ func (e Encoding) String() string {
 	return fmt.Sprintf("%s + %s", implicitness, endian)
 }
 
-// TransferSyntaxToEncodingMap provides a mapping between transfer syntax UID and encoding
+// transferSyntaxToEncodingMap provides a mapping between transfer syntax UID and encoding
 // I couldn't find this mapping in the NEMA documents.
-var TransferSyntaxToEncodingMap = map[string]*Encoding{
+var transferSyntaxToEncodingMap = map[string]*Encoding{
 	"1.2.840.10008.1.2":      {ImplicitVR: true, LittleEndian: true},
 	"1.2.840.10008.1.2.1":    {ImplicitVR: false, LittleEndian: true},
 	"1.2.840.10008.1.2.1.99": {ImplicitVR: false, LittleEndian: true},
@@ -220,12 +278,12 @@ var TransferSyntaxToEncodingMap = map[string]*Encoding{
 // GetEncodingForTransferSyntax returns the encoding for a given TransferSyntax, or defaults.
 func GetEncodingForTransferSyntax(ts TransferSyntax) *Encoding {
 	if ts.UIDEntry != nil {
-		encoding, found := TransferSyntaxToEncodingMap[ts.UIDEntry.UID]
+		encoding, found := transferSyntaxToEncodingMap[ts.UIDEntry.UID]
 		if found {
 			return encoding
 		}
 	}
-	return TransferSyntaxToEncodingMap["1.2.840.10008.1.2.1"] // fallback (default)
+	return transferSyntaxToEncodingMap["1.2.840.10008.1.2.1"] // fallback (default)
 }
 
 /*
@@ -425,7 +483,7 @@ func decodeContents(buffer []byte, e *Element) interface{} {
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
 			return float64(binary.LittleEndian.Uint64(buffer))
 		}
-		return float64(binary.BigEndian.Uint64(e.value.Bytes()))
+		return float64(binary.BigEndian.Uint64(e.value))
 	case "SS": // short
 		if len(buffer) < 2 {
 			goto InsufficientBytes
@@ -487,7 +545,7 @@ func (e Element) Value() interface{} {
 	       1.2: No:
 	           1.2.2: Return decoded contents
 	*/
-	// TODO: Check whether ValueBytes() is necessary, or whether e.value.Bytes() would suffice
+	// TODO: Check whether ValueBytes() is necessary, or whether e.value would suffice
 	valueBytes := e.ValueBytes()
 	if e.SupportsMultiVM() {
 		switch e.VR {
@@ -542,7 +600,7 @@ func (e Element) Value() interface{} {
 func (e Element) ValueBytes() []byte {
 	var buffer []byte
 	if e.value != nil && e.ValueLength > 0 {
-		return e.value.Bytes()
+		return e.value
 	}
 	for _, item := range e.Items {
 		if len(item.UnknownSections) > 0 {
@@ -569,6 +627,7 @@ func (e Element) ValueBytes() []byte {
 // GetElement yields an `Element` from the active stream, and an `error` if something went wrong.
 func (elementStream *ElementStream) GetElement() (Element, error) {
 	element := Element{}
+	element.sourceElementStream = elementStream
 	element.sourceElementStream = elementStream
 
 	startBytePos := elementStream.GetPosition()
@@ -599,7 +658,6 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 		if element.VR == "UN" { // only use source VR if we dont already have VR from dictionary (more reliable this way)
 			element.VR = string(VRbytes)
 		}
-
 		// issue #6: use *source* VR as basis for deciding whether to skip / size of length integer.
 		// in explicit VR mode, if the VR is OB, OW, SQ, UN or UT, skip two bytes and read as uint32, else uint16.
 		if VRstring == "OB" || VRstring == "OW" || VRstring == "SQ" || VRstring == "UN" || VRstring == "UT" {
@@ -642,7 +700,11 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 						return element, err
 					}
 					// not running in safe mode, we can truncate the buffer to remaining bytes
-					console.Warnf("element %s's value length was truncated from %d to %d bytes due to reaching end of the file. use with caution.", element.Tag, element.ValueLength, elementStream.GetRemainingBytes())
+					log.Warn().
+						Str("tag", element.Tag.String()).
+						Uint32("from", element.ValueLength).
+						Int64("to", elementStream.GetRemainingBytes()).
+						Msg("element value length truncated due to reaching end of the file. use with caution.")
 					element.ValueLength = uint32(elementStream.GetRemainingBytes())
 					valuebuf, err = elementStream.getBytes(uint(element.ValueLength))
 					if err != nil {
@@ -667,9 +729,9 @@ func (elementStream *ElementStream) GetElement() (Element, error) {
 					}
 				}
 			}
-			element.value = bytes.NewBuffer(valuebuf)
+			element.value = valuebuf
 		} else {
-			element.value = bytes.NewBuffer([]byte{})
+			element.value = []byte{}
 		}
 	}
 
@@ -977,13 +1039,24 @@ func ParseDicom(path string) (Dicom, error) {
 		return dcm, err
 	}
 	fileSize := stat.Size()
-	var bufferSize = DicomReadBufferSize
-	if fileSize < DicomReadBufferSize {
-		bufferSize = int(fileSize)
-	}
-	dcm.reader = bufio.NewReaderSize(f, bufferSize)
-	dcm.elementStream = NewElementStream(dcm.reader, fileSize)
 
+	if fileSize < 256*1024 {
+		dcm.reader = Get256k(f)
+		defer func() {
+			Put256k(dcm.reader)
+		}()
+	} else if fileSize < 512*1024 {
+		dcm.reader = Get512k(f)
+		defer func() {
+			Put512k(dcm.reader)
+		}()
+	} else {
+		dcm.reader = Get2mb(f)
+		defer func() {
+			Put2mb(dcm.reader)
+		}()
+	}
+	dcm.elementStream = NewElementStream(dcm.reader, fileSize)
 	if err := dcm.crawlMeta(); err != nil {
 		switch err.(type) {
 		case *NotADicom:
@@ -1002,12 +1075,22 @@ func ParseDicom(path string) (Dicom, error) {
 // ParseFromBytes parses a dicom from a bytestream
 func ParseFromBytes(source []byte) (Dicom, error) {
 	dcm := Dicom{}
-	r := bytes.NewReader(source)
-	var bufferSize = DicomReadBufferSize
-	if len(source) < DicomReadBufferSize {
-		bufferSize = len(source)
+	if len(source) < 256*1024 {
+		dcm.reader = Get256k(bytes.NewReader(source))
+		defer func() {
+			Put256k(dcm.reader)
+		}()
+	} else if len(source) < 512*1024 {
+		dcm.reader = Get512k(bytes.NewReader(source))
+		defer func() {
+			Put512k(dcm.reader)
+		}()
+	} else {
+		dcm.reader = Get2mb(bytes.NewReader(source))
+		defer func() {
+			Put2mb(dcm.reader)
+		}()
 	}
-	dcm.reader = bufio.NewReaderSize(r, bufferSize)
 	dcm.elementStream = NewElementStream(dcm.reader, int64(len(source)))
 	dcm.Elements = make(map[uint32]Element)
 
