@@ -25,24 +25,6 @@ import (
 
 /*
 ===============================================================================
-    Configuration
-===============================================================================
-*/
-
-// DicomReadBufferSize is the number of bytes to be buffered from disk when parsing dicoms
-const DicomReadBufferSize = 2 * 1024 * 1024 // 2MB
-
-/*
-  By enabling `StrictMode`, the parser will reject DICOM inputs which either:
-    - TODO: Contain an element with a value length exceeding the maximum allowed for its VR
-    - Contain an element with a value length exceeding the remaining file size. For example incomplete Pixel Data.
-*/
-
-// StrictMode controls whether the parser operates in a restricted manner, rejecting potentially corrupt data.
-var StrictMode = false
-
-/*
-===============================================================================
     Data Types
 ===============================================================================
 */
@@ -56,7 +38,7 @@ var Nalloc = 0
 var readerPool = ReaderPool{pool: &sync.Pool{
 	New: func() interface{} {
 		Nalloc++
-		return bufio.NewReaderSize(nil, DicomReadBufferSize)
+		return bufio.NewReaderSize(nil, GetOpenDCMConfig().DicomReadBufferSize)
 	},
 }}
 
@@ -664,7 +646,7 @@ func (es *ElementStream) GetElement() (Element, error) {
 			if err != nil {
 				switch err.(type) {
 				case InsufficientBytes:
-					if StrictMode {
+					if GetOpenDCMConfig().StrictMode {
 						return element, err
 					}
 					// not running in safe mode, we can truncate the buffer to remaining bytes

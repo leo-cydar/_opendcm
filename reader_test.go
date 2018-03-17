@@ -25,6 +25,8 @@ var validSequenceElementBytes = []byte{0x32, 0x00, 0x64, 0x10, 0x53, 0x51, 0x00,
 // array of bytes representing a valid "CS" VR element
 var validCSElementBytes = []byte{0x28, 0x00, 0x04, 0x00, 0x43, 0x53, 0x0C, 0x00, 0x4D, 0x4F, 0x4E, 0x4F, 0x43, 0x48, 0x52, 0x4F, 0x4D, 0x45, 0x32, 0x20}
 
+var cfg = GetOpenDCMConfig()
+
 // shorthand for parsing an Element from a byte array
 func elementFromBuffer(buf []byte) (Element, error) {
 	return elementStreamFromBuffer(buf).GetElement()
@@ -213,7 +215,8 @@ func TestParseCorruptDicoms(t *testing.T) {
 
 func TestStrictModeEnabled(t *testing.T) {
 	// in strict mode, inputs with elements exceeding remaining file size should be rejected
-	StrictMode = true
+	cfg.StrictMode = true
+	OverrideOpenDCMConfig(cfg)
 	path := filepath.Join("testdata", "synthetic", "CorruptOverflowElementLength.dcm")
 	_, err := ParseDicom(path)
 	switch err.(type) {
@@ -225,7 +228,8 @@ func TestStrictModeEnabled(t *testing.T) {
 func TestStrictModeDisabled(t *testing.T) {
 	// in non strict mode, inputs with elements exceeding remaining file size should not be rejected,
 	// and should have their length adjusted.
-	StrictMode = false
+	cfg.StrictMode = false
+	OverrideOpenDCMConfig(cfg)
 	path := filepath.Join("testdata", "synthetic", "CorruptOverflowElementLength.dcm")
 	_, err := ParseDicom(path)
 	if err != nil {
