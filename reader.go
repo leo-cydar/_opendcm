@@ -29,25 +29,32 @@ import (
 ===============================================================================
 */
 
-type ReaderPool struct {
+// readerPool wraps a `sync.Pool` to allow for custom Get/Put methods
+type readerPool struct {
 	pool *sync.Pool
 }
 
+// Nalloc is used in `opendcm-util` for showing number of reader allocations
 var Nalloc = 0
 
-var readerPool = ReaderPool{pool: &sync.Pool{
+// ReaderPool is a pool of `bufio.Reader` with a buffer size set to `Config`
+var ReaderPool = readerPool{pool: &sync.Pool{
 	New: func() interface{} {
 		Nalloc++
-		return bufio.NewReaderSize(nil, GetOpenDCMConfig().DicomReadBufferSize)
+		return bufio.NewReaderSize(nil, GetConfig().DicomReadBufferSize)
 	},
 }}
 
-func (rp *ReaderPool) Get(src io.Reader) (r *bufio.Reader) {
+// Get selects an arbitrary item from the Pool, removes it from the
+// Pool, and returns it to the caller.
+func (rp *readerPool) Get(src io.Reader) (r *bufio.Reader) {
 	r = rp.pool.Get().(*bufio.Reader)
 	r.Reset(src)
 	return
 }
-func (rp *ReaderPool) Put(r *bufio.Reader) {
+
+// Put adds `r` to the pool.
+func (rp *readerPool) Put(r *bufio.Reader) {
 	rp.pool.Put(r)
 }
 
@@ -289,6 +296,12 @@ func decodeBytes(src []byte, charset *CharacterSet) (string, error) {
 	return string(decoded), err
 }
 
+/*
+===============================================================================
+    `Element`: Value Representation
+===============================================================================
+*/
+
 // GetElement returns an Element inside the Dicom according to `tag`.
 // If the tag is not found, param `bool` will be false.
 func (df Dicom) GetElement(tag uint32) (Element, bool) {
@@ -302,12 +315,6 @@ func (i Item) GetElement(tag uint32) (Element, bool) {
 	e, ok := i.Elements[tag]
 	return e, ok
 }
-
-/*
-===============================================================================
-    `Element`: Value Representation
-===============================================================================
-*/
 
 // IsCharacterStringVR returns whether the VR is of character string type
 func IsCharacterStringVR(vr string) bool {
@@ -363,19 +370,19 @@ func (e Element) Describe(indentLevel int) []string {
 	var description []string
 	indentStr := strings.Repeat(" ", indentLevel)
 
-	if e.VR == "SQ" { // SQ can have nested elements
-		if len(e.Items) == 0 {
-			description = append(description, fmt.Sprintf("%s[%s] %s %s: (empty)", indentStr, e.VR, e.Tag, e.Name))
-		} else {
-			description = append(description, fmt.Sprintf("%s[%s] %s %s:", indentStr, e.VR, e.Tag, e.Name))
-			for _, item := range e.Items {
-				for _, e := range item.Elements {
-					description = append(description, e.Describe(indentLevel+4)...)
-				}
+	if e.VR == "SQ" && len(e.Items) == 0 {
+		return append(description, fmt.Sprintf("%s[%s] %s %s: (empty)", indentStr, e.VR, e.Tag, e.Name))
+	}
 
-				for _, b := range item.UnknownSections {
-					description = append(description, fmt.Sprintf("%s- (%d bytes) (not parsed)", indentStr, len(b)))
-				}
+	if len(e.Items) != 0 {
+		description = append(description, fmt.Sprintf("%s[%s] %s %s:", indentStr, e.VR, e.Tag, e.Name))
+		for _, item := range e.Items {
+			for _, e := range item.Elements {
+				description = append(description, e.Describe(indentLevel+4)...)
+			}
+
+			for _, b := range item.UnknownSections {
+				description = append(description, fmt.Sprintf("%s- (%d bytes) (not parsed)", indentStr, len(b)))
 			}
 		}
 	} else {
@@ -571,7 +578,7 @@ func (e Element) ValueBytes() []byte {
 
 /*
 ===============================================================================
-    `es`: Element Parser
+    `ElementStream`: Element Parser
 ===============================================================================
 */
 
@@ -646,7 +653,7 @@ func (es *ElementStream) GetElement() (Element, error) {
 			if err != nil {
 				switch err.(type) {
 				case InsufficientBytes:
-					if GetOpenDCMConfig().StrictMode {
+					if GetConfig().StrictMode {
 						return element, err
 					}
 					// not running in safe mode, we can truncate the buffer to remaining bytes
@@ -689,7 +696,7 @@ func (es *ElementStream) GetElement() (Element, error) {
 	return element, nil
 }
 
-// getSequence parses a sequence of "unlimited length" from the bytestream
+// getSequence parses a sequence of "undefined length" from the bytestream
 func (es *ElementStream) getSequence(parseElements bool) ([]Item, error) {
 	var items []Item
 	for {
@@ -719,7 +726,7 @@ func (es *ElementStream) getSequence(parseElements bool) ([]Item, error) {
 
 		var elements = make(map[uint32]Element)
 		var unknownBuffers [][]byte
-		if length == 0xFFFFFFFF { // unlimited length item
+		if length == 0xFFFFFFFF { // undefined length item
 			// find next FFFE, E00D = data for item ends
 			var delimitationItemBytes []byte
 			if es.TransferSyntax.Encoding.LittleEndian {
@@ -988,9 +995,9 @@ func ParseDicom(path string) (Dicom, error) {
 		return dcm, err
 	}
 	fileSize := stat.Size()
-	dcm.reader = readerPool.Get(f)
+	dcm.reader = ReaderPool.Get(f)
 	defer func() {
-		readerPool.Put(dcm.reader)
+		ReaderPool.Put(dcm.reader)
 	}()
 	dcm.elementStream = NewElementStream(dcm.reader, fileSize)
 	if err := dcm.crawlMeta(); err != nil {
@@ -1012,9 +1019,9 @@ func ParseDicom(path string) (Dicom, error) {
 func ParseFromBytes(source []byte) (Dicom, error) {
 	dcm := Dicom{}
 
-	dcm.reader = readerPool.Get(bytes.NewReader(source))
+	dcm.reader = ReaderPool.Get(bytes.NewReader(source))
 	defer func() {
-		readerPool.Put(dcm.reader)
+		ReaderPool.Put(dcm.reader)
 	}()
 	dcm.elementStream = NewElementStream(dcm.reader, int64(len(source)))
 	dcm.Elements = make(map[uint32]Element)

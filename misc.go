@@ -18,14 +18,14 @@ const OpenDCMRootUID = "1.2.826.0.1.3680043.9.7484."
 // It is used commonly in creating ImplementationClassUID(0002,0012)
 const OpenDCMVersion = "0.1"
 
-type OpenDCMConfig struct {
+// Config represents the application configuration
+type Config struct {
 	Version       string
 	OpenFileLimit int
 	RootUID       string
-	/*
-	  By enabling `StrictMode`, the parser will reject DICOM inputs which either:
-	    - TODO: Contain an element with a value length exceeding the maximum allowed for its VR
-	    - Contain an element with a value length exceeding the remaining file size. For example incomplete Pixel Data.
+	/* By enabling `StrictMode`, the parser will reject DICOM inputs which either:
+	   - TODO: Contain an element with a value length exceeding the maximum allowed for its VR
+	   - Contain an element with a value length exceeding the remaining file size. For example incomplete Pixel Data.
 	*/
 	StrictMode bool
 
@@ -88,11 +88,11 @@ func boolFromEnvDefault(key string, def bool) bool {
 	return def
 }
 
-var config OpenDCMConfig
+var config Config
 
-// GetOpenDCMConfig returns the application configuration.
+// GetConfig returns the application configuration.
 // Will set from environment if not already set.
-func GetOpenDCMConfig() OpenDCMConfig {
+func GetConfig() Config {
 	if !config._set {
 		config.OpenFileLimit = intFromEnvDefault("OPENDCM_OPENFILELIMIT", 64)
 		config.StrictMode = boolFromEnvDefault("OPENDCM_STRICTMODE", false)
@@ -102,13 +102,17 @@ func GetOpenDCMConfig() OpenDCMConfig {
 	return config
 }
 
-func OverrideOpenDCMConfig(newconfig OpenDCMConfig) {
+// OverrideConfig overrides the configuration parsed from environment with the one provided
+func OverrideConfig(newconfig Config) {
+	if !newconfig._set { // to prevent being reverted with subsequent calls to `GetConfig`
+		newconfig._set = true
+	}
 	config = newconfig
 }
 
 // ConcurrentlyWalkDir recursively traverses a directory and calls `onFile` for each found file inside a goroutine.
 func ConcurrentlyWalkDir(dirPath string, onFile func(file string)) error {
-	guard := make(chan bool, GetOpenDCMConfig().OpenFileLimit) // limits number of concurrently open files
+	guard := make(chan bool, GetConfig().OpenFileLimit) // limits number of concurrently open files
 	var files []string
 
 	err := filepath.Walk(dirPath, func(filePath string, info os.FileInfo, err error) error {

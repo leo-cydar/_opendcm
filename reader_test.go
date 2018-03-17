@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -25,7 +26,9 @@ var validSequenceElementBytes = []byte{0x32, 0x00, 0x64, 0x10, 0x53, 0x51, 0x00,
 // array of bytes representing a valid "CS" VR element
 var validCSElementBytes = []byte{0x28, 0x00, 0x04, 0x00, 0x43, 0x53, 0x0C, 0x00, 0x4D, 0x4F, 0x4E, 0x4F, 0x43, 0x48, 0x52, 0x4F, 0x4D, 0x45, 0x32, 0x20}
 
-var cfg = GetOpenDCMConfig()
+var validUNElementULBytes = []byte{0x28, 0x00, 0x04, 0x00, 0x55, 0x4E, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE, 0xFF, 0x00, 0xE0, 0x02, 0x00, 0x00, 0x00, 0x30, 0x30, 0xFE, 0xFF, 0xDD, 0xE0, 0x00, 0x00, 0x00, 0x00}
+
+var cfg = GetConfig()
 
 // shorthand for parsing an Element from a byte array
 func elementFromBuffer(buf []byte) (Element, error) {
@@ -108,32 +111,42 @@ func valueTypeMatchesVR(vr string, v interface{}) bool {
 ===============================================================================
 */
 
-// TestParseValidFile tests that, given a valid DICOM input, the parser will correctly parse embedded elements
-func TestParseValidFile(t *testing.T) {
+// TestParseValidFiles tests that, given a valid DICOM input, the parser will correctly parse embedded elements
+func TestParseValidFiles(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join("testdata", "TCIA", "1.3.6.1.4.1.14519.5.2.1.2744.7002.251446451370536632612663178782.dcm")
-	dcm, err := ParseDicom(path)
-	if err != nil {
-		t.Fatalf("error: %v", err)
+	cases := []struct {
+		path        string
+		numElements int
+	}{
+		{
+			path:        filepath.Join("testdata", "TCIA", "1.3.6.1.4.1.14519.5.2.1.2744.7002.251446451370536632612663178782.dcm"),
+			numElements: 105,
+		},
 	}
-	// should have found all elements
-	if l := len(dcm.Elements); l != 105 {
-		t.Fatalf("number of elements = %d (!= 105)", l)
-	}
-	stat, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-	// should be at end of file
-	if pos := dcm.elementStream.GetPosition(); pos != stat.Size() {
-		t.Fatalf("reader position = %d (!= %d)", pos, stat.Size())
-	}
+	for _, testCase := range cases {
+		dcm, err := ParseDicom(testCase.path)
+		if err != nil {
+			t.Fatalf("%s: error: %v", testCase.path, err)
+		}
+		// should have found all elements
+		if l := len(dcm.Elements); l != testCase.numElements {
+			t.Fatalf("%s: number of elements = %d (!= %d)", testCase.path, l, testCase.numElements)
+		}
+		stat, err := os.Stat(testCase.path)
+		if err != nil {
+			t.Fatalf("%s: error: %v", testCase.path, err)
+		}
+		// should be at end of file
+		if pos := dcm.elementStream.GetPosition(); pos != stat.Size() {
+			t.Fatalf("%s: reader position = %d (!= %d)", testCase.path, pos, stat.Size())
+		}
 
-	// check all elements values match correct type for their VR:
-	for _, e := range dcm.Elements {
-		val := e.Value()
-		if !valueTypeMatchesVR(e.VR, val) {
-			t.Fatalf(`type "%s" for element %s is incorrect (VR="%s")`, reflect.TypeOf(val), e.Tag, e.VR)
+		// check all elements values match correct type for their VR:
+		for _, e := range dcm.Elements {
+			val := e.Value()
+			if !valueTypeMatchesVR(e.VR, val) {
+				t.Fatalf(`%s: type "%s" for element %s is incorrect (VR="%s")`, testCase.path, reflect.TypeOf(val), e.Tag, e.VR)
+			}
 		}
 	}
 }
@@ -216,7 +229,7 @@ func TestParseCorruptDicoms(t *testing.T) {
 func TestStrictModeEnabled(t *testing.T) {
 	// in strict mode, inputs with elements exceeding remaining file size should be rejected
 	cfg.StrictMode = true
-	OverrideOpenDCMConfig(cfg)
+	OverrideConfig(cfg)
 	path := filepath.Join("testdata", "synthetic", "CorruptOverflowElementLength.dcm")
 	_, err := ParseDicom(path)
 	switch err.(type) {
@@ -229,7 +242,7 @@ func TestStrictModeDisabled(t *testing.T) {
 	// in non strict mode, inputs with elements exceeding remaining file size should not be rejected,
 	// and should have their length adjusted.
 	cfg.StrictMode = false
-	OverrideOpenDCMConfig(cfg)
+	OverrideConfig(cfg)
 	path := filepath.Join("testdata", "synthetic", "CorruptOverflowElementLength.dcm")
 	_, err := ParseDicom(path)
 	if err != nil {
@@ -279,6 +292,169 @@ func TestImplicitVRVRLengthMissing(t *testing.T) {
     Element Parsing: VRs
 ===============================================================================
 */
+
+func TestDecodeBytesEmptyCharset(t *testing.T) {
+	t.Parallel()
+	// should return string([]byte), so utf-8
+	val, err := decodeBytes([]byte("parser"), nil)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if val != "parser" {
+		t.Fatalf(`got "%s" (!= "parser")`, val)
+	}
+}
+
+func TestIsCharacterStringVR(t *testing.T) {
+	t.Parallel()
+	for _, v := range []string{"AE", "AS", "CS", "DA", "DS", "DT", "IS", "LO", "LT", "PN", "SH", "ST", "TM", "UI", "UT"} {
+		if !IsCharacterStringVR(v) {
+			t.Fatalf(`VR "%s" should be character string VR`, v)
+		}
+	}
+	for _, v := range []string{"OB", "FL"} {
+		if IsCharacterStringVR(v) {
+			t.Fatalf(`VR "%s" should not be character string VR`, v)
+		}
+	}
+}
+
+func TestSplitBinaryVM(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		input    []byte
+		nsplit   int
+		expected [][]byte
+	}{
+		{
+			input:    []byte{0xAB, 0x7F, 0x23, 0x42},
+			nsplit:   2,
+			expected: [][]byte{[]byte{0xAB, 0x7F}, []byte{0x23, 0x42}},
+		},
+		{
+			input:    []byte{0xFF, 0xFE, 0x09},
+			nsplit:   1,
+			expected: [][]byte{[]byte{0xFF}, []byte{0xFE}, []byte{0x09}},
+		},
+	}
+	for _, testCase := range testCases {
+		val := splitBinaryVM(testCase.input, testCase.nsplit)
+		if len(val) != len(testCase.expected) {
+			t.Fatalf("got %d splits (!= %d)", len(val), len(testCase.expected))
+		}
+	}
+}
+
+func TestSplitCharacterStringVM(t *testing.T) {
+	t.Parallel()
+	testCases := []struct {
+		input    []byte
+		expected [][]byte
+	}{
+		{
+			input:    []byte(`dicom\parse\9000`),
+			expected: [][]byte{[]byte(`dicom`), []byte(`parse`), []byte(`9000`)},
+		},
+		{
+			input:    []byte(`中文\名字\`),
+			expected: [][]byte{[]byte(`中文`), []byte(`名字`), nil},
+		},
+		{
+			input:    []byte(`\\中文\名字`),
+			expected: [][]byte{nil, nil, []byte(`中文`), []byte(`名字`)},
+		},
+	}
+	for _, testCase := range testCases {
+		val := splitCharacterStringVM(testCase.input)
+		if len(val) != len(testCase.expected) {
+			t.Fatalf("got %d splits (!= %d)", len(val), len(testCase.expected))
+		}
+		for i, split := range val {
+			if bytes.Compare(split, testCase.expected[i]) != 0 {
+				t.Fatalf(`got "%v" (!= "%v")`, split, testCase.expected[i])
+			}
+		}
+	}
+}
+
+func TestTagSorting(t *testing.T) {
+	t.Parallel()
+	elements := []Element{
+		{DictEntry: &dictionary.DictEntry{Tag: 0x00100020}},
+		{DictEntry: &dictionary.DictEntry{Tag: 0x0020008F}},
+		{DictEntry: &dictionary.DictEntry{Tag: 0x0001FFFF}},
+	}
+	sort.Sort(ByTag(elements))
+	if elements[0].Tag != 0x0001FFFF {
+		t.Fatalf(`sort failed`)
+	}
+	if elements[1].Tag != 0x00100020 {
+		t.Fatalf(`sort failed`)
+	}
+	if elements[2].Tag != 0x0020008F {
+		t.Fatalf(`sort failed`)
+	}
+}
+
+func TestDescribe(t *testing.T) {
+	t.Parallel()
+	// describe a SQ element, which contains nested elements for optimal coverage
+	lookup, _ := LookupTag(0x00081130) // SQ
+	lookupSub, _ := LookupTag(0x001811A2)
+	element := Element{DictEntry: lookup}
+	element.Items = []Item{
+		{Elements: map[uint32]Element{
+			0x001811A2: Element{DictEntry: lookupSub, value: []byte("10"), ValueLength: 2},
+		}},
+	}
+	description := element.Describe(0)
+	if len(description) != 2 {
+		t.Fatalf("%v", description[0])
+		t.Fatalf("got %d (!= 2) for SQ", len(description))
+	}
+	// now describe empty SQ
+	element = Element{DictEntry: lookup}
+	description = element.Describe(0)
+	if len(description) != 1 {
+		t.Fatalf("got %d (!= 1) for SQ", len(description))
+	}
+	// now describe Element with undefined length
+	element, err := elementFromBuffer(validUNElementULBytes)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	description = element.Describe(0)
+	if !strings.Contains(description[1], "2 bytes") {
+		t.Fatal(`"2 bytes" not found in description`)
+	}
+	if !strings.Contains(description[1], "not parsed") {
+		t.Fatal(`"not parsed" not found in description`)
+	}
+
+	// now describe Element with > 256 bytes length
+	// should not actually attempt to display contents
+	element, err = elementFromBuffer(validCSElementBytes)
+	element.ValueLength = 1024
+	description = element.Describe(0)
+	if !strings.Contains(description[0], "1024 bytes") {
+		t.Fatal(`"1024 bytes" not found in description`)
+	}
+}
+
+func TestSupportsMultiVM(t *testing.T) {
+	t.Parallel()
+	element := Element{DictEntry: &dictionary.DictEntry{VM: "1"}}
+	supports := element.SupportsMultiVM()
+	if supports {
+		t.Fatal("element with VM of 1 should not report as supporiing multiplicity")
+	}
+	element = Element{DictEntry: &dictionary.DictEntry{VM: "1-n"}}
+	supports = element.SupportsMultiVM()
+	if !supports {
+		t.Fatal("element with VM of '1-n' should report as supporiing multiplicity")
+	}
+}
 
 // TestParseCS attempts to parse CS
 func TestParseCS(t *testing.T) {
