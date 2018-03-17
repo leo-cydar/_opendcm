@@ -603,7 +603,7 @@ func StartViewDicom() {
 		}
 		sort.Sort(opendcm.ByTag(elements))
 		for _, element := range elements {
-			description := element.Describe()
+			description := element.Describe(0)
 			for _, line := range description {
 				log.Info().Msg(line)
 			}

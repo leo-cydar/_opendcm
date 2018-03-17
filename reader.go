@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/b71729/opendcm/dictionary"
@@ -376,35 +377,32 @@ func (a ByTag) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByTag) Less(i, j int) bool { return a[i].Tag < a[j].Tag }
 
 // Describe returns a string array of human-readable element description
-func (e Element) Describe() []string {
+func (e Element) Describe(indentLevel int) []string {
 	var description []string
+	indentStr := strings.Repeat(" ", indentLevel)
 
-	if len(e.Items) > 0 {
-		description = append(description, fmt.Sprintf("[%s] %s %s:", e.VR, e.Tag, e.Name))
-		for _, item := range e.Items {
-			for _, e := range item.Elements {
-				if e.ValueLength <= 256 {
-					description = append(description, fmt.Sprintf("     - %s [%s] %v", e.Tag, e.VR, e.Value()))
-				} else {
-					description = append(description, fmt.Sprintf("     - %s [%s] (%d bytes)", e.Tag, e.VR, e.ValueLength))
+	if e.VR == "SQ" { // SQ can have nested elements
+		if len(e.Items) == 0 {
+			description = append(description, fmt.Sprintf("%s[%s] %s %s: (empty)", indentStr, e.VR, e.Tag, e.Name))
+		} else {
+			description = append(description, fmt.Sprintf("%s[%s] %s %s:", indentStr, e.VR, e.Tag, e.Name))
+			for _, item := range e.Items {
+				for _, e := range item.Elements {
+					description = append(description, e.Describe(indentLevel+4)...)
 				}
-			}
 
-			for _, b := range item.UnknownSections {
-				description = append(description, fmt.Sprintf("     - (%d bytes) (not parsed)", len(b)))
+				for _, b := range item.UnknownSections {
+					description = append(description, fmt.Sprintf("%s- (%d bytes) (not parsed)", indentStr, len(b)))
+				}
 			}
 		}
 	} else {
 		if e.ValueLength <= 256 {
-			description = append(description, fmt.Sprintf("[%s] %s %s: %v", e.VR, e.Tag, e.Name, e.Value()))
+			description = append(description, fmt.Sprintf("%s[%s] %s %s: %v", indentStr, e.VR, e.Tag, e.Name, e.Value()))
 		} else {
-			description = append(description, fmt.Sprintf("[%s] %s %s: (%d bytes)", e.VR, e.Tag, e.Name, e.ValueLength))
+			description = append(description, fmt.Sprintf("%s[%s] %s %s: (%d bytes)", indentStr, e.VR, e.Tag, e.Name, e.ValueLength))
 		}
 	}
-
-	// if !e.CheckConformance() {
-	//     description[0] = fmt.Sprintf("!! %s", description[0])
-	// }
 	return description
 }
 
