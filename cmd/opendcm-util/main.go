@@ -53,8 +53,8 @@ func main() {
 	} else {
 		cmd := os.Args[1]
 		switch cmd {
-		case "inspect":
-			StartInspect()
+		case "view":
+			StartViewDicom()
 		case "reduce":
 			StartReduce()
 		case "simulate":
@@ -69,7 +69,7 @@ func main() {
 	}
 	return
 usage:
-	log.Fatal().Msgf("usage: %s [%s] [flags]", baseFile, strings.Join([]string{"inspect", "reduce", "gendatadict", "createdicom", "simulate"}, " / "))
+	log.Fatal().Msgf("usage: %s [%s] [flags]", baseFile, strings.Join([]string{"view", "reduce", "gendatadict", "createdicom", "simulate"}, " / "))
 }
 
 /*
@@ -582,15 +582,15 @@ func StartReduce() {
 
 /*
 ===============================================================================
-    Mode: Inspect DICOM File
+    Mode: View DICOM File
 ===============================================================================
 */
 
-// StartInspect enters "inspect" mode.
-// This allows for the inspection of a dicom file, and listing of its elements.
-func StartInspect() {
+// StartViewDicom enters "view" mode.
+// This allows for viewing of a dicom file (listing of its elements and their values)
+func StartViewDicom() {
 	if len(os.Args) != 3 {
-		log.Fatal().Msgf("usage: %s inspect file_or_dir", baseFile)
+		log.Fatal().Msgf("usage: %s view file_or_dir", baseFile)
 	}
 	stat, err := os.Stat(os.Args[2])
 	check(err)
