@@ -78,6 +78,7 @@ usage:
 ===============================================================================
 */
 
+// StartSimulate simulates load over time
 func StartSimulate() {
 	var files []string
 	opendcm.ConcurrentlyWalkDir(os.Args[2], func(file string) {
@@ -227,6 +228,7 @@ func tableBodyPosition(data string) (posStart int, posEnd int, err error) {
 	return posStart, posEnd, nil
 }
 
+// StartGenDataDict generates data dictionary
 func StartGenDataDict() {
 	if len(os.Args) != 3 {
 		log.Fatal().Msgf("usage: %s gendatadict dictFromNEMA.xml", baseFile)
@@ -726,9 +728,6 @@ func genItemBytes(tagString string, value []byte, VR string, length uint32) []by
 ===============================================================================
 */
 
-// StartReduce enters "reduce" directory mode.
-// This scans the input directory for unique dicoms (unique SeriesInstanceUID) and copies those dicoms
-//   to the output directory.
 // copy the src file to dst. Any existing file will be overwritten and will not
 // copy file attributes.
 // Source: https://stackoverflow.com/a/21061062
@@ -752,6 +751,9 @@ func copy(src, dst string) error {
 	return out.Close()
 }
 
+// StartReduce enters "reduce" directory mode.
+// This scans the input directory for unique dicoms (unique SeriesInstanceUID) and copies those dicoms
+//   to the output directory.
 func StartReduce() {
 	if len(os.Args) != 4 {
 		log.Fatal().Msgf("usage: %s reduce in_dir out_dir", baseFile)

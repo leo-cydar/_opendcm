@@ -334,12 +334,12 @@ func TestSplitBinaryVM(t *testing.T) {
 		{
 			input:    []byte{0xAB, 0x7F, 0x23, 0x42},
 			nsplit:   2,
-			expected: [][]byte{[]byte{0xAB, 0x7F}, []byte{0x23, 0x42}},
+			expected: [][]byte{{0xAB, 0x7F}, {0x23, 0x42}},
 		},
 		{
 			input:    []byte{0xFF, 0xFE, 0x09},
 			nsplit:   1,
-			expected: [][]byte{[]byte{0xFF}, []byte{0xFE}, []byte{0x09}},
+			expected: [][]byte{{0xFF}, {0xFE}, {0x09}},
 		},
 	}
 	for _, testCase := range testCases {
@@ -409,7 +409,7 @@ func TestDescribe(t *testing.T) {
 	element := Element{DictEntry: lookup}
 	element.Items = []Item{
 		{Elements: map[uint32]Element{
-			0x001811A2: Element{DictEntry: lookupSub, value: []byte("10"), ValueLength: 2},
+			0x001811A2: {DictEntry: lookupSub, value: []byte("10"), ValueLength: 2},
 		}},
 	}
 	description := element.Describe(0)
@@ -435,6 +435,9 @@ func TestDescribe(t *testing.T) {
 	// now describe Element with > 256 bytes length
 	// should not actually attempt to display contents
 	element, err = elementFromBuffer(validCSElementBytes)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
 	element.ValueLength = 1024
 	description = element.Describe(0)
 	if !strings.Contains(description[0], "1024 bytes") {
