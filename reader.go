@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -84,8 +85,8 @@ type ByTag []Element
 
 // Item represents a nested Item within a Sequence (see: NEMA 7.5 Nesting of Data Sets)
 type Item struct {
-	Elements        map[uint32]Element
-	UnknownSections [][]byte
+	Elements map[uint32]Element
+	Unparsed []byte
 }
 
 // ElementStream provides an abstraction layer around a `*bytes.Reader` to facilitate easier parsing.
@@ -139,32 +140,32 @@ type VRSpecification struct {
 ===============================================================================
 */
 
-// UnsupportedDicom is an error representing that the `Dicom` is unsupported
+// UnsupportedDicom is an error indicating that the `Dicom` is unsupported
 type UnsupportedDicom struct {
 	error
 }
 
-// NotADicom is an error representing that the input is not recognised as a valid dicom
+// NotADicom is an error indicating that the input is not recognised as a valid dicom
 type NotADicom struct {
 	error
 }
 
-// CorruptDicom is an error representing that a `Dicom` is corrupt
+// CorruptDicom is an error indicating that a `Dicom` is corrupt
 type CorruptDicom struct {
 	error
 }
 
-// InsufficientBytes is an error representing that there are not enough bytes left in a buffer
+// InsufficientBytes is an error indicating that there are not enough bytes left in a buffer
 type InsufficientBytes struct {
 	error
 }
 
-// CorruptElement is an error representing that an `Element` is corrupt
+// CorruptElement is an error indicating that an `Element` is corrupt
 type CorruptElement struct {
 	error
 }
 
-// CorruptElementStream is an error representing that the `es` encountered a general problem
+// CorruptElementStream is an error indicating that the `ElementStream` encountered a general problem
 type CorruptElementStream struct {
 	error
 }
@@ -195,7 +196,8 @@ func checkTransferSyntaxSupport(tsuid string) bool {
 	case "1.2.840.10008.1.2", // Implicit VR Little Endian: Default Transfer Syntax for DICOM
 		"1.2.840.10008.1.2.1",    // Explicit VR Little Endian,
 		"1.2.840.10008.1.2.2",    // Explicit VR Big Endian (Retired)
-		"1.2.840.10008.1.2.4.91", // JPEG 2000 Image Compression
+		"1.2.840.10008.1.2.4.91", // JPEG 2000 Image Compression,
+		"1.2.840.10008.1.2.4.90", // JPEG 2000 Image Compression (Lossless Only)
 		"1.2.840.10008.1.2.4.70": // Default Transfer Syntax for Lossless JPEG Image Compression
 		return true
 	default:
@@ -212,6 +214,7 @@ func (ts *TransferSyntax) SetFromUID(uidstr string) error {
 	}
 	ts.UIDEntry = uidptr
 	ts.Encoding = GetEncodingForTransferSyntax(*ts)
+	log.Debug().Str("syntax", ts.Encoding.String()).Msgf("switched transfer syntax %s", uidstr)
 	return nil
 }
 
@@ -369,20 +372,18 @@ func (a ByTag) Less(i, j int) bool { return a[i].Tag < a[j].Tag }
 func (e Element) Describe(indentLevel int) []string {
 	var description []string
 	indentStr := strings.Repeat(" ", indentLevel)
-
-	if e.VR == "SQ" && len(e.Items) == 0 {
-		return append(description, fmt.Sprintf("%s[%s] %s %s: (empty)", indentStr, e.VR, e.Tag, e.Name))
-	}
-
-	if len(e.Items) != 0 {
+	if e.ValueLength == 0xFFFFFFFF { // undefined length: will contain items
+		if len(e.Items) == 0 {
+			return append(description, fmt.Sprintf("%s[%s] %s %s: (empty)", indentStr, e.VR, e.Tag, e.Name))
+		}
 		description = append(description, fmt.Sprintf("%s[%s] %s %s:", indentStr, e.VR, e.Tag, e.Name))
 		for _, item := range e.Items {
-			for _, e := range item.Elements {
-				description = append(description, e.Describe(indentLevel+4)...)
-			}
-
-			for _, b := range item.UnknownSections {
-				description = append(description, fmt.Sprintf("%s- (%d bytes) (not parsed)", indentStr, len(b)))
+			if len(item.Unparsed) > 0 { // the element contains an unparsed buffer.
+				description = append(description, fmt.Sprintf("%s    (%d bytes)", indentStr, len(item.Unparsed)))
+			} else {
+				for _, e := range item.Elements {
+					description = append(description, e.Describe(indentLevel+4)...)
+				}
 			}
 		}
 	} else {
@@ -397,7 +398,7 @@ func (e Element) Describe(indentLevel int) []string {
 
 // SupportsMultiVM returns whether the Element can contain multiple values
 func (e Element) SupportsMultiVM() bool {
-	return e.VM != "" && e.VM != "1"
+	return e.VM != "" && e.VM != "1" && e.VM != "1-1" && e.VM != "0"
 }
 
 func decodeContents(buffer []byte, e *Element) interface{} {
@@ -431,17 +432,17 @@ func decodeContents(buffer []byte, e *Element) interface{} {
 			goto InsufficientBytes
 		}
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
-			return float32(binary.LittleEndian.Uint32(buffer))
+			return math.Float32frombits(binary.LittleEndian.Uint32(buffer))
 		}
-		return float32(binary.BigEndian.Uint32(buffer))
+		return math.Float32frombits(binary.BigEndian.Uint32(buffer))
 	case "FD": // double
 		if len(buffer) < 8 {
 			goto InsufficientBytes
 		}
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
-			return float64(binary.LittleEndian.Uint64(buffer))
+			return math.Float64frombits(binary.LittleEndian.Uint64(buffer))
 		}
-		return float64(binary.BigEndian.Uint64(e.value))
+		return math.Float64frombits(binary.BigEndian.Uint64(e.value))
 	case "SS": // short
 		if len(buffer) < 2 {
 			goto InsufficientBytes
@@ -485,13 +486,9 @@ InsufficientBytes:
 
 // Value returns an abstraction layer to the underlying bytestream according to VR
 func (e Element) Value() interface{} {
-	if e.value == nil || e.ValueLength == 0 { // check both to be sure
-		if len(e.Items) > 0 {
-			return e.Items
-		}
-		return nil // neither value nor items are set: contents are empty
+	if e.ValueLength == 0xFFFFFFFF || len(e.Items) > 0 { // undefined length: will contain items
+		return e.Items
 	}
-
 	/*
 	   Psuedocode for parsing VM =
 	   1: Check whether element supports multivm
@@ -561,12 +558,6 @@ func (e Element) ValueBytes() []byte {
 		return e.value
 	}
 	for _, item := range e.Items {
-		if len(item.UnknownSections) > 0 {
-			for _, v := range item.UnknownSections {
-				buffer = append(buffer, v...)
-			}
-			continue
-		}
 		for _, v := range item.Elements {
 			//log.Printf("Found element: %s", v.Tag)
 			buffer = append(buffer, v.ValueBytes()...)
@@ -585,7 +576,6 @@ func (e Element) ValueBytes() []byte {
 // GetElement yields an `Element` from the active stream, and an `error` if something went wrong.
 func (es *ElementStream) GetElement() (Element, error) {
 	element := Element{}
-	element.sourceElementStream = es
 	element.sourceElementStream = es
 
 	startBytePos := es.GetPosition()
@@ -702,30 +692,30 @@ func (es *ElementStream) getSequence(parseElements bool) ([]Item, error) {
 	for {
 		lower, err := es.getUint16()
 		if err != nil {
-			return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
+			return items, CorruptElementStreamError("getSequence(): %v", err)
 		}
 		upper, err := es.getUint16()
 		if err != nil {
-			return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
+			return items, CorruptElementStreamError("getSequence(): %v", err)
 		}
 		tagUint32 := (uint32(lower) << 16) | uint32(upper)
 		if tagUint32 == 0xFFFEE0DD {
 			err := es.skipBytes(4)
 			if err != nil {
-				return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
+				return items, CorruptElementStreamError("getSequence(): %v", err)
 			}
 			break
 		}
 		if tagUint32 != 0xFFFEE000 {
-			return items, CorruptElementStreamError("getSequence(%v): 0x%08X != 0xFFFEE000", parseElements, tagUint32)
+			return items, CorruptElementStreamError("getSequence(): 0x%08X != 0xFFFEE000 (%d)", tagUint32, es.GetPosition())
 		}
 		length, err := es.getUint32()
 		if err != nil {
-			return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
+			return items, CorruptElementStreamError("getSequence(): %v", err)
 		}
 
 		var elements = make(map[uint32]Element)
-		var unknownBuffers [][]byte
+		var unparsed = make([]byte, 0)
 		if length == 0xFFFFFFFF { // undefined length item
 			// find next FFFE, E00D = data for item ends
 			var delimitationItemBytes []byte
@@ -739,12 +729,12 @@ func (es *ElementStream) getSequence(parseElements bool) ([]Item, error) {
 				// try to grab an element according to current TransferSyntax
 				e, err := es.GetElement()
 				if err != nil {
-					return items, CorruptDicomError("getSequence(%v): %v", parseElements, err)
+					return items, CorruptDicomError("getSequence(): %v", err)
 				}
 				elements[uint32(e.Tag)] = e
 				check, err := es.reader.Peek(4)
 				if err != nil {
-					return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
+					return items, CorruptElementStreamError("getSequence(): %v", err)
 				}
 				if bytes.Equal(check, delimitationItemBytes) {
 					// end
@@ -755,35 +745,33 @@ func (es *ElementStream) getSequence(parseElements bool) ([]Item, error) {
 			// now we must skip eight bytes (delimitation item + 0x00{4}) (see: NEMA Table 7.5-3)
 			err = es.skipBytes(8)
 			if err != nil {
-				return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
+				return items, CorruptElementStreamError("getSequence(): %v", err)
 			}
 		} else {
 			// try to grab an element according to current TransferSyntax
+			if length == 0 {
+				continue
+				/* Turns out the data set had bytes:
+				   (40 00 08 00) (53 51)  00 00 (FF FF  FF FF) (FE FF  00 E0) (00 00  00 00) (FE FF  DD E0) 00 00
+				   (4b: tag)     (2b:SQ)        (4b: un.len)   (4b:itm start) (4b: 0 len)    (4b: seq end)
+				   Therefore, the item genuinely had length of zero.
+				   This condition accounts for this possibility.
+				*/
+			}
 			if parseElements {
-				if length == 0 {
-					continue
-					/* Turns out the data set had bytes:
-					   (40 00 08 00) (53 51)  00 00 (FF FF  FF FF) (FE FF  00 E0) (00 00  00 00) (FE FF  DD E0) 00 00
-					   (4b: tag)     (2b:SQ)        (4b: un.len)   (4b:itm start) (4b: 0 len)    (4b: seq end)
-					   Therefore, the item genuinely had length of zero.
-					   This condition accounts for this possibility.
-					*/
-				}
 				element, err := es.GetElement()
 				if err != nil {
-					return items, CorruptDicomError("getSequence(%v): %v", parseElements, err)
+					return items, CorruptDicomError("getSequence(): %v", err)
 				}
 				elements[uint32(element.Tag)] = element
-
 			} else {
-				valuebuffer, err := es.getBytes(uint(length))
+				unparsed, err = es.getBytes(uint(length))
 				if err != nil {
-					return items, CorruptElementStreamError("getSequence(%v): %v", parseElements, err)
+					return items, CorruptDicomError("getSequence(): %v", err)
 				}
-				unknownBuffers = append(unknownBuffers, valuebuffer)
 			}
 		}
-		item := Item{Elements: elements, UnknownSections: unknownBuffers}
+		item := Item{Elements: elements, Unparsed: unparsed}
 		items = append(items, item)
 	}
 
@@ -877,7 +865,7 @@ func (es *ElementStream) getBytes(num uint) ([]byte, error) {
 	return buf, nil
 }
 
-// NewElementStream sets up a new `es`
+// NewElementStream sets up a new `ElementStream`
 func NewElementStream(readerPtr *bufio.Reader, readerSize int64) (stream ElementStream) {
 	stream = ElementStream{TransferSyntax: TransferSyntax{}}
 	stream.CharacterSet = CharacterSetMap["Default"]
@@ -887,7 +875,7 @@ func NewElementStream(readerPtr *bufio.Reader, readerSize int64) (stream Element
 	return
 }
 
-// SetTransferSyntax sets the `es`s TransferSyntax according to uid string
+// SetTransferSyntax sets the `ElementStream`s TransferSyntax according to uid string
 func (es *ElementStream) SetTransferSyntax(transferSyntaxUID string) {
 	es.TransferSyntax.SetFromUID(transferSyntaxUID)
 	es.TransferSyntax.Encoding = GetEncodingForTransferSyntax(es.TransferSyntax)
@@ -942,20 +930,22 @@ func (df *Dicom) crawlMeta() error {
 }
 
 func (df *Dicom) crawlElements() error {
-	transfersyntaxuid := "1.2.840.10008.1.2.1"
 	// change transfer syntax if necessary
-	tsElement, found := df.GetElement(0x0020010)
+	tsElement, found := df.GetElement(0x00020010)
 	if found {
 		if transfersyntaxuid, ok := tsElement.Value().(string); ok {
 			supported := checkTransferSyntaxSupport(transfersyntaxuid)
 			if !supported {
 				return &UnsupportedDicom{fmt.Errorf("unsupported transfer syntax: %s", transfersyntaxuid)}
 			}
+			df.elementStream.SetTransferSyntax(transfersyntaxuid)
+
 		} else {
 			return CorruptDicomError("TransferSyntaxUID is corrupt")
 		}
+	} else {
+		df.elementStream.SetTransferSyntax("1.2.840.10008.1.2.1")
 	}
-	df.elementStream.SetTransferSyntax(transfersyntaxuid)
 
 	for {
 		if df.elementStream.GetPosition() >= df.elementStream.readerSize {
