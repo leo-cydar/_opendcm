@@ -244,7 +244,32 @@ func TestParseFileWithMissingTransferSyntax(t *testing.T) {
 	if len(dcm.Elements) != 8 {
 		t.Fatalf("found %d elements (!= 8)", len(dcm.Elements))
 	}
+}
 
+func TestParseFileWithMissingPreambleMagic(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join("testdata", "synthetic", "MissingPreambleMagic.dcm")
+	dcm, err := ParseDicom(path)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if dcm.TotalMetaBytes != 192 {
+		t.Fatalf("meta length = %d (!= 192)", dcm.TotalMetaBytes)
+	}
+	// transfer syntax should be the default (ImplicitVR, LittleEndian)
+	if dcm.elementStream.TransferSyntax.UIDEntry.UID != "1.2.840.10008.1.2" {
+		t.Fatalf(`missing transfer syntax should have defaulted to "1.2.840.10008.1.2" (got "%s")`, dcm.elementStream.TransferSyntax.UIDEntry.UID)
+	}
+	e, found := dcm.GetElement(0x7FE00010)
+	if !found {
+		t.Fatalf("could not find (7FE0,0010) in file")
+	}
+	if e.ValueLength != 4 {
+		t.Fatalf("(7FE0,0010) has value length of %d (!= 4)", e.ValueLength)
+	}
+	if len(dcm.Elements) != 8 {
+		t.Fatalf("found %d elements (!= 8)", len(dcm.Elements))
+	}
 }
 
 /*
@@ -277,15 +302,20 @@ func TestParseCorruptDicoms(t *testing.T) {
 */
 
 func TestStrictModeEnabled(t *testing.T) {
-	// in strict mode, inputs with elements exceeding remaining file size should be rejected
+	// in strict mode, certain dodgy inputs should be rejected
 	cfg.StrictMode = true
 	OverrideConfig(cfg)
-	path := filepath.Join("testdata", "synthetic", "CorruptOverflowElementLength.dcm")
-	_, err := ParseDicom(path)
-	switch err.(type) {
-	case *CorruptDicom:
-	default:
-		t.Fatalf(`with "StrictMode" disabled, parsing "%s" should have raised a CorruptDicomError (got %v)`, path, err)
+	testCases := []string{
+		filepath.Join("testdata", "synthetic", "CorruptOverflowElementLength.dcm"),
+		filepath.Join("testdata", "synthetic", "MissingPreambleMagic.dcm"),
+	}
+	for _, testCase := range testCases {
+		_, err := ParseDicom(testCase)
+		switch err.(type) {
+		case *CorruptDicom:
+		default:
+			t.Fatalf(`with "StrictMode" disabled, parsing "%s" should have raised a CorruptDicomError (got %v)`, testCase, err)
+		}
 	}
 }
 func TestStrictModeDisabled(t *testing.T) {
@@ -293,10 +323,15 @@ func TestStrictModeDisabled(t *testing.T) {
 	// and should have their length adjusted.
 	cfg.StrictMode = false
 	OverrideConfig(cfg)
-	path := filepath.Join("testdata", "synthetic", "CorruptOverflowElementLength.dcm")
-	_, err := ParseDicom(path)
-	if err != nil {
-		t.Fatalf(`with "StrictMode" disabled, parsing "%s" should not have raised an error (got %v)`, path, err)
+	testCases := []string{
+		filepath.Join("testdata", "synthetic", "CorruptOverflowElementLength.dcm"),
+		filepath.Join("testdata", "synthetic", "MissingPreambleMagic.dcm"),
+	}
+	for _, testCase := range testCases {
+		_, err := ParseDicom(testCase)
+		if err != nil {
+			t.Fatalf(`with "StrictMode" disabled, parsing "%s" should not have raised an error (got %v)`, testCase, err)
+		}
 	}
 }
 

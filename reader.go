@@ -886,54 +886,51 @@ func (es *ElementStream) SetTransferSyntax(transferSyntaxUID string) {
 ===============================================================================
 */
 
+func (df *Dicom) getPreamble() ([]byte, bool) {
+	preamble, err := df.elementStream.reader.Peek(132)
+	if err != nil {
+		return preamble, false
+	}
+	if string(preamble[128:]) != "DICM" {
+		return preamble[:128], false
+	}
+	err = df.elementStream.skipBytes(132)
+	if err != nil {
+		panic(err)
+	}
+	return preamble[:128], true
+}
+
 func (df *Dicom) crawlMeta() error {
-	preamble, err := df.elementStream.getBytes(128)
-	if err != nil {
-		return CorruptDicomError("crawlMeta(): %v", err)
-	}
-	copy(df.Preamble[:], preamble)
-	dicmTestString, err := df.elementStream.getBytes(4)
-	if err != nil {
-		return CorruptDicomError("crawlMeta(): %v", err)
-	}
-	if string(dicmTestString) != "DICM" {
-		return &NotADicom{}
-	}
-
-	metaLengthElement, err := df.elementStream.GetElement()
-	if err != nil {
-		return CorruptDicomError("crawlMeta: %v", err)
-	}
-	df.Elements[uint32(metaLengthElement.Tag)] = metaLengthElement
-
-	if val, ok := metaLengthElement.Value().(uint32); ok {
-		df.TotalMetaBytes = df.elementStream.GetPosition() + int64(val)
+	preamble, preambleFound := df.getPreamble()
+	if preambleFound {
+		copy(df.Preamble[:], preamble)
+	} else {
+		log.Warn().Msg("Missing preamble (bytes 0-128)")
+		if GetConfig().StrictMode {
+			return CorruptDicomError("crawlMeta: no dicom preamble found")
+		}
 	}
 
 	for {
-		element, err := df.elementStream.GetElement()
+		// check whether meta section has finished
+		nextUpperBytes, err := df.elementStream.reader.Peek(2)
+		if err != nil {
+			break
+		}
+		nextUpper := binary.LittleEndian.Uint16(nextUpperBytes)
+		if nextUpper != 0x0002 {
+			log.Debug().Msgf("Exiting meta (nextUpper = %04X)", nextUpper)
+			df.TotalMetaBytes = df.elementStream.GetPosition()
+			break
+		}
 
+		// get next element
+		element, err := df.elementStream.GetElement()
 		if err != nil {
 			return CorruptDicomError("crawlMeta: %v", err)
 		}
 		df.Elements[uint32(element.Tag)] = element
-		// if Meta Group Length (0002,0000) is missing, determine end of meta by upper tag
-		if df.TotalMetaBytes == 0 {
-			nextUpperBytes, err := df.elementStream.reader.Peek(2)
-			if err != nil {
-				break
-			}
-			nextUpper := binary.LittleEndian.Uint16(nextUpperBytes)
-			if nextUpper > 0x0002 {
-				//log.Debug().Msgf("Exiting meta (nextUpper = %04X)", nextUpper)
-				df.TotalMetaBytes = df.elementStream.GetPosition()
-				break
-			}
-		} else { // otherwise we can just check whether the position is equal or greater to meta length
-			if df.elementStream.GetPosition() >= df.TotalMetaBytes {
-				break
-			}
-		}
 	}
 
 	return nil
