@@ -2,7 +2,9 @@ package opendcm
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -175,12 +177,23 @@ func TestOverrideConfig(t *testing.T) {
 }
 
 func TestConcurrentlyWalkDir(t *testing.T) {
-	t.Parallel()
 	files := make([]string, 0)
-	ConcurrentlyWalkDir(".", func(path string) {
+	// make temporary directory for tests
+	tmpdir, err := ioutil.TempDir("", "opendcm")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	// be sure to remove up dir afterwards
+	defer os.RemoveAll(tmpdir)
+	for i := 0; i < 10; i++ {
+		_, err = ioutil.TempFile(tmpdir, strconv.Itoa(i))
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+	}
+	ConcurrentlyWalkDir(tmpdir, func(path string) {
 		files = append(files, path)
 	})
-
 	if len(files) == 0 {
 		t.Fatalf("did not report any files")
 	}

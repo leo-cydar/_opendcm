@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // OpenDCMRootUID contains the official designated root UID prefix for OpenDCM
@@ -114,6 +115,7 @@ func OverrideConfig(newconfig Config) {
 func ConcurrentlyWalkDir(dirPath string, onFile func(file string)) error {
 	guard := make(chan bool, GetConfig().OpenFileLimit) // limits number of concurrently open files
 	var files []string
+	wg := sync.WaitGroup{}
 
 	err := filepath.Walk(dirPath, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -131,12 +133,16 @@ func ConcurrentlyWalkDir(dirPath string, onFile func(file string)) error {
 
 	// now goroutine each file
 	for _, filePath := range files {
+		wg.Add(1)
 		guard <- true // would block if guard channel is already filled
 		go func(path string) {
 			onFile(path)
 			<-guard
+
+			wg.Done()
 		}(filePath)
 	}
+	wg.Wait()
 	return nil
 }
 

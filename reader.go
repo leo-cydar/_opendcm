@@ -214,7 +214,7 @@ func (ts *TransferSyntax) SetFromUID(uidstr string) error {
 	}
 	ts.UIDEntry = uidptr
 	ts.Encoding = GetEncodingForTransferSyntax(*ts)
-	log.Debug().Str("syntax", ts.Encoding.String()).Msgf("switched transfer syntax %s", uidstr)
+	//log.Debug().Str("syntax", ts.Encoding.String()).Msgf("switched transfer syntax %s", uidstr)
 	return nil
 }
 
@@ -372,10 +372,7 @@ func (a ByTag) Less(i, j int) bool { return a[i].Tag < a[j].Tag }
 func (e Element) Describe(indentLevel int) []string {
 	var description []string
 	indentStr := strings.Repeat(" ", indentLevel)
-	if e.ValueLength == 0xFFFFFFFF { // undefined length: will contain items
-		if len(e.Items) == 0 {
-			return append(description, fmt.Sprintf("%s[%s] %s %s: (empty)", indentStr, e.VR, e.Tag, e.Name))
-		}
+	if len(e.Items) > 0 {
 		description = append(description, fmt.Sprintf("%s[%s] %s %s:", indentStr, e.VR, e.Tag, e.Name))
 		for _, item := range e.Items {
 			if len(item.Unparsed) > 0 { // the element contains an unparsed buffer.
@@ -386,12 +383,14 @@ func (e Element) Describe(indentLevel int) []string {
 				}
 			}
 		}
-	} else {
+	} else if e.ValueLength > 0 {
 		if e.ValueLength <= 256 {
 			description = append(description, fmt.Sprintf("%s[%s] %s %s: %v", indentStr, e.VR, e.Tag, e.Name, e.Value()))
 		} else {
 			description = append(description, fmt.Sprintf("%s[%s] %s %s: (%d bytes)", indentStr, e.VR, e.Tag, e.Name, e.ValueLength))
 		}
+	} else { // no value, nor items; return empty
+		return append(description, fmt.Sprintf("%s[%s] %s %s: (empty)", indentStr, e.VR, e.Tag, e.Name))
 	}
 	return description
 }

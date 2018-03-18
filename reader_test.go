@@ -122,6 +122,10 @@ func TestParseValidFiles(t *testing.T) {
 			path:        filepath.Join("testdata", "TCIA", "1.3.6.1.4.1.14519.5.2.1.2744.7002.251446451370536632612663178782.dcm"),
 			numElements: 105,
 		},
+		{
+			path:        filepath.Join("testdata", "synthetic", "VRTest.dcm"),
+			numElements: 37,
+		},
 	}
 	for _, testCase := range cases {
 		dcm, err := ParseDicom(testCase.path)
@@ -410,7 +414,6 @@ func TestDescribe(t *testing.T) {
 	}
 	description := element.Describe(0)
 	if len(description) != 2 {
-		t.Fatalf("%v", description[0])
 		t.Fatalf("got %d (!= 2) for SQ", len(description))
 	}
 	// now describe empty SQ
@@ -428,9 +431,6 @@ func TestDescribe(t *testing.T) {
 	if !strings.Contains(description[1], "2 bytes") {
 		t.Fatal(`"2 bytes" not found in description`)
 	}
-	if !strings.Contains(description[1], "not parsed") {
-		t.Fatal(`"not parsed" not found in description`)
-	}
 
 	// now describe Element with > 256 bytes length
 	// should not actually attempt to display contents
@@ -444,15 +444,22 @@ func TestDescribe(t *testing.T) {
 
 func TestSupportsMultiVM(t *testing.T) {
 	t.Parallel()
-	element := Element{DictEntry: &dictionary.DictEntry{VM: "1"}}
-	supports := element.SupportsMultiVM()
-	if supports {
-		t.Fatal("element with VM of 1 should not report as supporiing multiplicity")
+	testCases := []struct {
+		VM       string
+		supports bool
+	}{
+		{supports: false, VM: "1"},
+		{supports: false, VM: "0"},
+		{supports: false, VM: "1-1"},
+		{supports: true, VM: "1-n"},
+		{supports: true, VM: "1-8"},
 	}
-	element = Element{DictEntry: &dictionary.DictEntry{VM: "1-n"}}
-	supports = element.SupportsMultiVM()
-	if !supports {
-		t.Fatal("element with VM of '1-n' should report as supporiing multiplicity")
+	for _, testCase := range testCases {
+		element := Element{DictEntry: &dictionary.DictEntry{VM: testCase.VM}}
+		supports := element.SupportsMultiVM()
+		if testCase.supports != supports {
+			t.Fail()
+		}
 	}
 }
 
@@ -501,8 +508,8 @@ func TestParseSQ(t *testing.T) {
 	if l := len(item.Elements); l != 4 {
 		t.Fatalf("len(item.Elements) = %d (!= 4)", l)
 	}
-	if l := len(item.UnknownSections); l != 0 {
-		t.Fatalf("len(item.UnknownSections) = %d (!= 0)", l)
+	if l := len(item.Unparsed); l != 0 {
+		t.Fatalf("len(item.Unparsed) = %d (!= 0)", l)
 	}
 	// embedded element should match
 	subelement, found := item.GetElement(0x00080102)
