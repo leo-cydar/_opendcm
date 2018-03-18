@@ -220,6 +220,33 @@ func TestParseFileWithMissingMetaLength(t *testing.T) {
 	}
 }
 
+func TestParseFileWithMissingTransferSyntax(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join("testdata", "synthetic", "MissingTransferSyntax.dcm")
+	dcm, err := ParseDicom(path)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if dcm.TotalMetaBytes != 324 {
+		t.Fatalf("meta length = %d (!= 324)", dcm.TotalMetaBytes)
+	}
+	// transfer syntax should be the default (ImplicitVR, LittleEndian)
+	if dcm.elementStream.TransferSyntax.UIDEntry.UID != "1.2.840.10008.1.2" {
+		t.Fatalf(`missing transfer syntax should have defaulted to "1.2.840.10008.1.2" (got "%s")`, dcm.elementStream.TransferSyntax.UIDEntry.UID)
+	}
+	e, found := dcm.GetElement(0x7FE00010)
+	if !found {
+		t.Fatalf("could not find (7FE0,0010) in file")
+	}
+	if e.ValueLength != 4 {
+		t.Fatalf("(7FE0,0010) has value length of %d (!= 4)", e.ValueLength)
+	}
+	if len(dcm.Elements) != 8 {
+		t.Fatalf("found %d elements (!= 8)", len(dcm.Elements))
+	}
+
+}
+
 /*
 ===============================================================================
     File Parsing: Invalid DICOMs

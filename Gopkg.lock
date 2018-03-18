@@ -2,29 +2,14 @@
 
 
 [[projects]]
-  name = "go.uber.org/atomic"
-  packages = ["."]
-  revision = "8474b86a5a6f79c443ce4b2992817ff32cf208b8"
-  version = "v1.3.1"
-
-[[projects]]
-  name = "go.uber.org/multierr"
-  packages = ["."]
-  revision = "3c4937480c32f4c13a875a1829af76c98ca3d40a"
-  version = "v1.1.0"
-
-[[projects]]
-  name = "go.uber.org/zap"
+  name = "github.com/rs/zerolog"
   packages = [
     ".",
-    "buffer",
-    "internal/bufferpool",
-    "internal/color",
-    "internal/exit",
-    "zapcore"
+    "internal/json",
+    "log"
   ]
-  revision = "35aad584952c3e7020db7b839f6b102de6271f89"
-  version = "v1.7.1"
+  revision = "56a970de510213e50dbaa39ad73ac07c9ec75606"
+  version = "v1.5.0"
 
 [[projects]]
   name = "golang.org/x/text"
@@ -49,6 +34,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "603b5b11856d1b6bec0ca82cac8fa6e75a96321bd89976a18718749b1daffed8"
+  inputs-digest = "af0c28bd9527b1a05eacb6e4c89b86df48befbeb81d5ce38bfe4d48f7a27c0c8"
   solver-name = "gps-cdcl"
   solver-version = 1
