@@ -134,6 +134,11 @@ type VRSpecification struct {
 	CharsetRe          *regexp.Regexp
 }
 
+var RecognisedVRs = []string{
+	"AE", "AS", "AT", "CS", "DA", "DS", "DT", "FL", "FD", "IS", "LO", "LT", "OB", "OD",
+	"OF", "OW", "PN", "SH", "SL", "SQ", "SS", "ST", "TM", "UI", "UL", "UN", "US", "UT",
+}
+
 /*
 ===============================================================================
     Error Types
@@ -896,7 +901,7 @@ func (df *Dicom) getPreamble() ([]byte, bool) {
 	}
 	err = df.elementStream.skipBytes(132)
 	if err != nil {
-		panic(err)
+		panic(err) // should never happen, since we have already called `Peek(132)`
 	}
 	return preamble[:128], true
 }
@@ -932,8 +937,35 @@ func (df *Dicom) crawlMeta() error {
 		}
 		df.Elements[uint32(element.Tag)] = element
 	}
-
 	return nil
+}
+
+// guessTransferSyntax is a heuristic for determining the in-use transfer syntax
+// 1. First, try to get tag and VR from first 6 bytes as ExplicitVR, LittleEndian
+// 2. If bytes zero to two > 2000, its most likely Big Endian
+// 3. if bytes four to six match VR string, it's most likely explicit VR
+func (df *Dicom) guessTransferSyntax() (encoding Encoding, success bool) {
+	peeked, err := df.elementStream.reader.Peek(6)
+	if err != nil {
+		success = false
+		return
+	}
+	firstTwoLE := binary.LittleEndian.Uint16(peeked[0:2])
+	encoding.LittleEndian = true
+	if firstTwoLE > 2000 && firstTwoLE != 0x7FE0 {
+		// likely big endian
+		encoding.LittleEndian = false
+	}
+	vrfrombytes := string(peeked[4:6])
+	encoding.ImplicitVR = true
+	for _, vr := range RecognisedVRs {
+		if vr == vrfrombytes {
+			// likely explicit VR
+			encoding.ImplicitVR = false
+		}
+	}
+	success = true
+	return
 }
 
 func (df *Dicom) crawlElements() error {
@@ -946,14 +978,19 @@ func (df *Dicom) crawlElements() error {
 				return &UnsupportedDicom{fmt.Errorf("unsupported transfer syntax: %s", transfersyntaxuid)}
 			}
 			df.elementStream.SetTransferSyntax(transfersyntaxuid)
-
 		} else {
 			return CorruptDicomError("TransferSyntaxUID is corrupt")
 		}
 	} else {
 		df.elementStream.SetTransferSyntax("1.2.840.10008.1.2")
+		encoding, success := df.guessTransferSyntax()
+		if success {
+			log.Debug().Bool("ImplicitVR", encoding.ImplicitVR).Bool("LittleEndian", encoding.LittleEndian).Msgf("guessed transfer syntax")
+			df.elementStream.TransferSyntax.Encoding = &encoding
+		} else {
+			return CorruptDicomError("crawlElements(): missing transfer syntax tag in file, and could not guess transfer syntax")
+		}
 	}
-
 	for {
 		if df.elementStream.GetPosition() >= df.elementStream.readerSize {
 			break
