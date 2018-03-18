@@ -200,6 +200,26 @@ func TestParseFileWithZeroElementLength(t *testing.T) {
 	}
 }
 
+func TestParseFileWithMissingMetaLength(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join("testdata", "synthetic", "MissingMetaLength.dcm")
+	dcm, err := ParseDicom(path)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if dcm.TotalMetaBytes != 340 {
+		t.Fatalf("meta length = %d (!= 340)", dcm.TotalMetaBytes)
+	}
+	e, found := dcm.GetElement(0x7FE00010)
+	if !found {
+		t.Fatalf("could not find (7FE0,0010) in file")
+	}
+
+	if e.ValueLength != 4 {
+		t.Fatalf("(7FE0,0010) has value length of %d (!= 4)", e.ValueLength)
+	}
+}
+
 /*
 ===============================================================================
     File Parsing: Invalid DICOMs
@@ -211,7 +231,6 @@ func TestParseCorruptDicoms(t *testing.T) {
 	// attempt to parse corrupt dicoms
 	corruptFiles := []string{
 		"CorruptBadTransferSyntax.dcm",
-		"CorruptMissingMetaLength.dcm",
 	}
 	for _, file := range corruptFiles {
 		path := filepath.Join("testdata", "synthetic", file)

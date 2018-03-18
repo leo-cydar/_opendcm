@@ -908,8 +908,6 @@ func (df *Dicom) crawlMeta() error {
 
 	if val, ok := metaLengthElement.Value().(uint32); ok {
 		df.TotalMetaBytes = df.elementStream.GetPosition() + int64(val)
-	} else {
-		return CorruptDicomError("meta length element is corrupt")
 	}
 
 	for {
@@ -919,9 +917,22 @@ func (df *Dicom) crawlMeta() error {
 			return CorruptDicomError("crawlMeta: %v", err)
 		}
 		df.Elements[uint32(element.Tag)] = element
-
-		if df.elementStream.GetPosition() >= df.TotalMetaBytes {
-			break
+		// if Meta Group Length (0002,0000) is missing, determine end of meta by upper tag
+		if df.TotalMetaBytes == 0 {
+			nextUpperBytes, err := df.elementStream.reader.Peek(2)
+			if err != nil {
+				break
+			}
+			nextUpper := binary.LittleEndian.Uint16(nextUpperBytes)
+			if nextUpper > 0x0002 {
+				//log.Debug().Msgf("Exiting meta (nextUpper = %04X)", nextUpper)
+				df.TotalMetaBytes = df.elementStream.GetPosition()
+				break
+			}
+		} else { // otherwise we can just check whether the position is equal or greater to meta length
+			if df.elementStream.GetPosition() >= df.TotalMetaBytes {
+				break
+			}
 		}
 	}
 
@@ -943,7 +954,7 @@ func (df *Dicom) crawlElements() error {
 			return CorruptDicomError("TransferSyntaxUID is corrupt")
 		}
 	} else {
-		df.elementStream.SetTransferSyntax("1.2.840.10008.1.2.1")
+		df.elementStream.SetTransferSyntax("1.2.840.10008.1.2")
 	}
 
 	for {
