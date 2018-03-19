@@ -431,7 +431,7 @@ func decodeContents(buffer []byte, e *Element) interface{} {
 			Warnf(`found "AT" element bad length (%d bytes). use with caution.`, len(buffer))
 			return buffer
 		}
-		tagUint32 := tagFromBytes(buffer[:4])
+		tagUint32 := tagFromBytes(buffer[:4], e.sourceElementStream.TransferSyntax.Encoding.LittleEndian)
 		tag := dictionary.Tag(tagUint32)
 		return tag.String()
 	case "FL": // float
@@ -838,8 +838,11 @@ func (es *ElementStream) getUint32() (res uint32, err error) {
 }
 
 // tagFromBytes returns a tag uint32 from an array of bytes. length should be at least four.
-func tagFromBytes(buf []byte) uint32 {
-	return (uint32(binary.LittleEndian.Uint16(buf[0:2])) << 16) | uint32(binary.LittleEndian.Uint16(buf[2:4]))
+func tagFromBytes(buf []byte, littleEndian bool) uint32 {
+	if littleEndian {
+		return (uint32(binary.LittleEndian.Uint16(buf[0:2])) << 16) | uint32(binary.LittleEndian.Uint16(buf[2:4]))
+	}
+	return (uint32(binary.BigEndian.Uint16(buf[0:2])) << 16) | uint32(binary.BigEndian.Uint16(buf[2:4]))
 }
 
 // getTag retrieves a tag uint32 from the reader
@@ -855,7 +858,7 @@ func (es *ElementStream) getTag() (tag uint32, err error) {
 	if es.nread != 4 {
 		return 0, CorruptElementStreamError("getUint32(): nread = %d (!= 4)", es.nread)
 	}
-	tag = tagFromBytes(es.ui32b[:])
+	tag = tagFromBytes(es.ui32b[:], es.TransferSyntax.Encoding.LittleEndian)
 	return
 }
 
@@ -959,23 +962,14 @@ func (df *Dicom) crawlMeta() error {
 	return nil
 }
 
-// guessTransferSyntax is a heuristic for determining the in-use transfer syntax
-// 1. First, try to get tag and VR from first 6 bytes as ExplicitVR, LittleEndian
-// 2. If bytes zero to two > 2000, its most likely Big Endian
-// 3. if bytes four to six match VR string, it's most likely explicit VR
-func (df *Dicom) guessTransferSyntax() (encoding Encoding, success bool) {
-	peeked, err := df.elementStream.reader.Peek(6)
-	if err != nil {
-		success = false
-		return
-	}
-	firstTwoLE := binary.LittleEndian.Uint16(peeked[0:2])
+func guessTransferSyntaxFromBytes(buf []byte) (encoding Encoding, success bool) {
+	firstTwoLE := binary.LittleEndian.Uint16(buf[0:2])
 	encoding.LittleEndian = true
 	if firstTwoLE > 2000 && firstTwoLE != 0x7FE0 {
 		// likely big endian
 		encoding.LittleEndian = false
 	}
-	vrfrombytes := string(peeked[4:6])
+	vrfrombytes := string(buf[4:6])
 	encoding.ImplicitVR = true
 	for _, vr := range RecognisedVRs {
 		if vr == vrfrombytes {
@@ -984,6 +978,18 @@ func (df *Dicom) guessTransferSyntax() (encoding Encoding, success bool) {
 		}
 	}
 	success = true
+	return
+}
+
+// guessTransferSyntax is a heuristic for determining the in-use transfer syntax
+// 1. First, try to get tag and VR from first 6 bytes as ExplicitVR, LittleEndian
+// 2. If bytes zero to two > 2000, its most likely Big Endian
+// 3. if bytes four to six match VR string, it's most likely explicit VR
+func (df *Dicom) guessTransferSyntax() (encoding Encoding, success bool) {
+	peeked, err := df.elementStream.reader.Peek(6)
+	if err == nil {
+		encoding, success = guessTransferSyntaxFromBytes(peeked)
+	}
 	return
 }
 

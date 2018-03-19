@@ -690,6 +690,42 @@ func TestParseSQ(t *testing.T) {
 	}
 }
 
+// TestGuessTransferSyntaxFromBytes tests whether we are able to guess the correct transfer syntax
+// from a series of signautre bytes.
+func TestGuessTransferSyntaxFromBytes(t *testing.T) {
+	t.Parallel()
+	testCases := []struct {
+		signature []byte
+		expected  Encoding
+	}{
+		{
+			signature: []byte{0x08, 0x00, 0x06, 0x00, 0x53, 0x51},
+			expected:  Encoding{ImplicitVR: false, LittleEndian: true},
+		},
+		{
+			signature: []byte{0x08, 0x00, 0x06, 0x00, 0xFF, 0xFF},
+			expected:  Encoding{ImplicitVR: true, LittleEndian: true},
+		},
+		{
+			signature: []byte{0x00, 0x08, 0x00, 0x06, 0x53, 0x51},
+			expected:  Encoding{ImplicitVR: false, LittleEndian: false},
+		},
+		{
+			signature: []byte{0x00, 0x08, 0x00, 0x06, 0xFF, 0xFF},
+			expected:  Encoding{ImplicitVR: true, LittleEndian: false},
+		},
+	}
+	for i, testCase := range testCases {
+		encoding, success := guessTransferSyntaxFromBytes(testCase.signature)
+		if !success {
+			t.Fatalf("no success guessing transfer syntax for signature #%d", i+1)
+		}
+		if encoding != testCase.expected {
+			t.Fatalf("guessed wrong encoding for signature #%d", i+1)
+		}
+	}
+}
+
 // TestUnrecognisedSetFromUID tests that, given an unrecognised UID string, `SetFromUID` returns an error
 func TestUrecognisedSetFromUID(t *testing.T) {
 	t.Parallel()
