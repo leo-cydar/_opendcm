@@ -277,20 +277,20 @@ func TestParseFileWithMissingPreambleMagic(t *testing.T) {
     File Parsing: Invalid DICOMs
 ===============================================================================
 */
-//TestParsecorruptDicoms tests that, given corrupted inputs, the parser will fail in an controlled manner
-func TestParseCorruptDicoms(t *testing.T) {
+//TestParseUnsupportedDicoms tests that, given unsupported or unrecognised inputs, the parser will fail in an controlled manner
+func TestParseUnsupportedDicoms(t *testing.T) {
 	t.Parallel()
-	// attempt to parse corrupt dicoms
+	// attempt to parse unsupported dicoms
 	corruptFiles := []string{
-		"CorruptBadTransferSyntax.dcm",
+		"UnrecognisedTransferSyntax.dcm",
 	}
 	for _, file := range corruptFiles {
 		path := filepath.Join("testdata", "synthetic", file)
 		_, err := ParseDicom(path)
 		switch err.(type) {
-		case *CorruptDicom:
+		case *UnsupportedDicom:
 		default:
-			t.Fatalf(`parsing corrupt dicom "%s" should have raised a CorruptDicomError (got %v)`, path, err)
+			t.Fatalf(`parsing dicom "%s" with unrecognised Transfer Syntax should have raised an UnsupportedDicom error (got %v)`, path, err)
 		}
 	}
 }

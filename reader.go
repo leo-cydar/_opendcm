@@ -189,6 +189,11 @@ func CorruptElementStreamError(format string, a ...interface{}) *CorruptElementS
 	return &CorruptElementStream{fmt.Errorf(format, a...)}
 }
 
+// UnsupportedDicomError raises a `UnsupportedDicom` error
+func UnsupportedDicomError(format string, a ...interface{}) *UnsupportedDicom {
+	return &UnsupportedDicom{fmt.Errorf(format, a...)}
+}
+
 /*
 ===============================================================================
     `TransferSyntax`: Support For Multiple Transfer Syntaxes
@@ -647,7 +652,7 @@ func (es *ElementStream) GetElement() (Element, error) {
 				switch err.(type) {
 				case InsufficientBytes:
 					if GetConfig().StrictMode {
-						return element, err
+						return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
 					}
 					// not running in safe mode, we can truncate the buffer to remaining bytes
 					Warnf("element %s: value length truncated from %d bytes to %d bytes due to reaching end of the file. use with caution.",
@@ -729,7 +734,14 @@ func (es *ElementStream) getSequence(parseElements bool) ([]Item, error) {
 				// try to grab an element according to current TransferSyntax
 				e, err := es.GetElement()
 				if err != nil {
-					return items, CorruptDicomError("getSequence(): %v", err)
+					switch err.(type) {
+					case *CorruptElement:
+						return nil, CorruptElementStreamError("getSequence(): %v", err)
+					case *UnsupportedDicom:
+						return nil, UnsupportedDicomError("getSequence(): %v", err)
+					default:
+						panic(err)
+					}
 				}
 				elements[uint32(e.Tag)] = e
 				check, err := es.reader.Peek(4)
@@ -761,13 +773,20 @@ func (es *ElementStream) getSequence(parseElements bool) ([]Item, error) {
 			if parseElements {
 				element, err := es.GetElement()
 				if err != nil {
-					return items, CorruptDicomError("getSequence(): %v", err)
+					switch err.(type) {
+					case *CorruptElement:
+						return nil, CorruptElementStreamError("getSequence(): %v", err)
+					case *UnsupportedDicom:
+						return nil, UnsupportedDicomError("getSequence(): %v", err)
+					default:
+						panic(err)
+					}
 				}
 				elements[uint32(element.Tag)] = element
 			} else {
 				unparsed, err = es.getBytes(uint(length))
 				if err != nil {
-					return items, CorruptDicomError("getSequence(): %v", err)
+					return items, CorruptElementStreamError("getSequence(): %v", err)
 				}
 			}
 		}
@@ -921,7 +940,7 @@ func (df *Dicom) crawlMeta() error {
 		}
 		nextUpper := binary.LittleEndian.Uint16(nextUpperBytes)
 		if nextUpper != 0x0002 {
-			Debugf("exiting meta (nextUpper = %04X)", nextUpper)
+			Debugf("exiting meta (nextUpper = %04X, offset = 0x%X)", nextUpper, df.elementStream.GetPosition())
 			df.TotalMetaBytes = df.elementStream.GetPosition()
 			break
 		}
@@ -929,7 +948,14 @@ func (df *Dicom) crawlMeta() error {
 		// get next element
 		element, err := df.elementStream.GetElement()
 		if err != nil {
-			return CorruptDicomError("crawlMeta: %v", err)
+			switch err.(type) {
+			case *CorruptElement, *CorruptElementStream:
+				return CorruptDicomError("crawlMeta(): %v", err)
+			case *UnsupportedDicom:
+				return UnsupportedDicomError("crawlMeta(): %v", err)
+			default:
+				panic(err)
+			}
 		}
 		df.Elements[uint32(element.Tag)] = element
 	}
@@ -971,7 +997,7 @@ func (df *Dicom) crawlElements() error {
 		if transfersyntaxuid, ok := tsElement.Value().(string); ok {
 			supported := checkTransferSyntaxSupport(transfersyntaxuid)
 			if !supported {
-				return &UnsupportedDicom{fmt.Errorf("unsupported transfer syntax: %s", transfersyntaxuid)}
+				return UnsupportedDicomError("transfer syntax %s is unsupported", transfersyntaxuid)
 			}
 			df.elementStream.SetTransferSyntax(transfersyntaxuid)
 		} else {
@@ -993,7 +1019,15 @@ func (df *Dicom) crawlElements() error {
 		}
 		element, err := df.elementStream.GetElement()
 		if err != nil {
-			return CorruptDicomError("crawlElements(): %v", err)
+			switch err.(type) {
+			case *CorruptElement:
+				return CorruptDicomError("crawlElements(): %v", err)
+			case *UnsupportedDicom:
+				return UnsupportedDicomError("crawlElements(): %v", err)
+			default:
+				panic(err)
+			}
+
 		}
 		df.Elements[uint32(element.Tag)] = element
 
@@ -1032,14 +1066,24 @@ func ParseDicom(path string) (Dicom, error) {
 	dcm.elementStream = NewElementStream(dcm.reader, fileSize)
 	if err := dcm.crawlMeta(); err != nil {
 		switch err.(type) {
-		case *NotADicom:
-			return dcm, &NotADicom{fmt.Errorf(`The file "%s" is not a valid dicom`, filepath.Base(path))}
+		case *CorruptDicom:
+			return dcm, CorruptDicomError(`the file "%s" is corrupt: %v`, filepath.Base(path), err)
+		case *UnsupportedDicom:
+			return dcm, UnsupportedDicomError(`the file "%s" is unsupported: %v`, filepath.Base(path), err)
 		default:
-			return dcm, CorruptDicomError(`The file "%s" is corrupt: %v`, filepath.Base(path), err)
+			panic(err)
 		}
 	}
 	if err := dcm.crawlElements(); err != nil {
-		return dcm, CorruptDicomError(`The dicom "%s" is corrupt: %v`, filepath.Base(path), err)
+		switch err.(type) {
+		case *CorruptDicom:
+			return dcm, CorruptDicomError(`the file "%s" is corrupt: %v`, filepath.Base(path), err)
+		case *UnsupportedDicom:
+			return dcm, UnsupportedDicomError(`the file "%s" is unsupported: %v`, filepath.Base(path), err)
+		default:
+			panic(err)
+		}
+
 	}
 
 	return dcm, nil
@@ -1058,14 +1102,23 @@ func ParseFromBytes(source []byte) (Dicom, error) {
 
 	if err := dcm.crawlMeta(); err != nil {
 		switch err.(type) {
-		case *NotADicom:
-			return dcm, &NotADicom{fmt.Errorf(`The bytes do not form a valid dicom`)}
+		case *CorruptDicom:
+			return dcm, CorruptDicomError(`the input bytes are corrupt: %v`, err)
+		case *UnsupportedDicom:
+			return dcm, UnsupportedDicomError(`the input bytes are unsupported: %v`, err)
 		default:
-			return dcm, CorruptDicomError(`The bytes are corrupt: %v`, err)
+			panic(err)
 		}
 	}
 	if err := dcm.crawlElements(); err != nil {
-		return dcm, CorruptDicomError(`The bytes are corrupt: %v`, err)
+		switch err.(type) {
+		case *CorruptDicom:
+			return dcm, CorruptDicomError(`the input bytes are corrupt: %v`, err)
+		case *UnsupportedDicom:
+			return dcm, UnsupportedDicomError(`the input bytes are unsupported: %v`, err)
+		default:
+			panic(err)
+		}
 	}
 	return dcm, nil
 }

@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/b71729/opendcm"
+	. "github.com/b71729/opendcm" // yes, dot imports are discouraged, but otherwise prefixing everything is a pain in the arse
 	"github.com/b71729/opendcm/dictionary"
 )
 
@@ -31,38 +31,33 @@ func check(err error) {
 	}
 }
 
-// IsAPipe returns whether the given `os.File` is a pipe
-func IsAPipe(f *os.File) bool {
-	fi, err := f.Stat()
-	check(err)
-	return (fi.Mode() & os.ModeCharDevice) == 0
+func usage() {
+	fmt.Printf("OpenDCM version %s\n", OpenDCMVersion)
+	fmt.Printf("usage: %s [%s] [flags]\n", baseFile, strings.Join([]string{"view", "reduce", "gendatadict", "createdicom", "simulate"}, " / "))
+	os.Exit(1)
 }
 
 func main() {
 	GetConfig()
-	Infof("OpenDCM version %s", OpenDCMVersion)
 	if len(os.Args) == 1 || (os.Args[1] == "--help" || os.Args[1] == "-h") {
-		goto usage
-	} else {
-		cmd := os.Args[1]
-		switch cmd {
-		case "view":
-			StartViewDicom()
-		case "reduce":
-			StartReduce()
-		case "simulate":
-			StartSimulate()
-		case "gendatadict":
-			StartGenDataDict()
-		case "createdicom":
-			StartCreateDicom()
-		default:
-			goto usage
-		}
+		usage()
+	}
+	cmd := os.Args[1]
+	switch cmd {
+	case "view":
+		StartViewDicom()
+	case "reduce":
+		StartReduce()
+	case "simulate":
+		StartSimulate()
+	case "gendatadict":
+		StartGenDataDict()
+	case "createdicom":
+		StartCreateDicom()
+	default:
+		usage()
 	}
 	return
-usage:
-	Fatalf("usage: %s [%s] [flags]", baseFile, strings.Join([]string{"view", "reduce", "gendatadict", "createdicom", "simulate"}, " / "))
 }
 
 /*
@@ -217,7 +212,9 @@ func tableBodyPosition(data string) (posStart int, posEnd int, err error) {
 // StartGenDataDict generates data dictionary
 func StartGenDataDict() {
 	if len(os.Args) != 3 {
-		Fatalf("usage: %s gendatadict dictFromNEMA.xml", baseFile)
+		fmt.Printf("OpenDCM version %s\n", OpenDCMVersion)
+		fmt.Printf("usage: %s gendatadict dictFromNEMA.xml", baseFile)
+		os.Exit(1)
 	}
 
 	// read input XML file to buffer
@@ -459,7 +456,9 @@ func writeMeta() []byte {
 // This allows for the creation of synthetic dicom files. Primary usage is for unit tests and verification of bugs.
 func StartCreateDicom() {
 	if len(os.Args) != 3 {
-		Fatalf("usage: %s createdicom out_file", baseFile)
+		fmt.Printf("OpenDCM version %s\n", OpenDCMVersion)
+		fmt.Printf("usage: %s createdicom out_file", baseFile)
+		os.Exit(1)
 	}
 	outFileName := os.Args[2]
 	if _, err := os.Stat(outFileName); err == nil {
@@ -742,7 +741,9 @@ func copy(src, dst string) error {
 //   to the output directory.
 func StartReduce() {
 	if len(os.Args) != 4 {
-		Fatalf("usage: %s reduce in_dir out_dir", baseFile)
+		fmt.Printf("OpenDCM version %s\n", OpenDCMVersion)
+		fmt.Printf("usage: %s reduce in_dir out_dir\n", baseFile)
+		os.Exit(1)
 	}
 	dirIn := os.Args[2]
 	dirOut := os.Args[3]
@@ -793,7 +794,9 @@ func StartReduce() {
 // This allows for viewing of a dicom file (listing of its elements and their values)
 func StartViewDicom() {
 	if len(os.Args) != 3 {
-		Fatalf("usage: %s view file_or_dir", baseFile)
+		fmt.Printf("OpenDCM version %s\n", OpenDCMVersion)
+		fmt.Printf("usage: %s view file_or_dir\n", baseFile)
+		os.Exit(1)
 	}
 	stat, err := os.Stat(os.Args[2])
 	check(err)
@@ -808,19 +811,28 @@ func StartViewDicom() {
 		for _, element := range elements {
 			description := element.Describe(0)
 			for _, line := range description {
-				Info(line)
+				fmt.Println(line)
 			}
 		}
 	} else {
+		errorCount := 0
+		successCount := 0
 		err := ConcurrentlyWalkDir(os.Args[2], func(path string) {
 			_, err := ParseDicom(path)
 			basePath := filepath.Base(path)
-			if err == nil {
-				Infof(`parsed "%s"`, basePath)
-			} else {
-				Infof(`error parsing "%s": %v`, basePath, err)
+			if err != nil {
+				Errorf(`error parsing "%s": %v`, basePath, err)
+				errorCount++
+				return
 			}
+			successCount++
+			Debugf(`parsed "%s"`, basePath)
 		})
 		check(err)
+		if errorCount == 0 {
+			Infof("parsed %d files without errors", successCount)
+		} else {
+			Infof("parsed %d files without errors, and failed to parse %d files", successCount, errorCount)
+		}
 	}
 }
