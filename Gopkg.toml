@@ -26,10 +26,6 @@
 
 
 [[constraint]]
-  name = "github.com/rs/zerolog"
-  version = "1.5.0"
-
-[[constraint]]
   name = "golang.org/x/text"
   version = "0.3.0"
 
