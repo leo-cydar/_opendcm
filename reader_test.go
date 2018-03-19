@@ -155,6 +155,56 @@ func TestParseValidFiles(t *testing.T) {
 	}
 }
 
+// TestParseValidBuffers tests that, given a valid DICOM buffer, the parser will correctly parse embedded elements
+func TestParseValidBuffers(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		path        string
+		numElements int
+	}{
+		{
+			path:        filepath.Join("testdata", "TCIA", "1.3.6.1.4.1.14519.5.2.1.2744.7002.251446451370536632612663178782.dcm"),
+			numElements: 105,
+		},
+		{
+			path:        filepath.Join("testdata", "synthetic", "VRTest.dcm"),
+			numElements: 37,
+		},
+	}
+	for _, testCase := range cases {
+		f, err := os.Open(testCase.path)
+		if err != nil {
+			t.Fatalf("%s: error: %v", testCase.path, err)
+		}
+		stat, err := os.Stat(testCase.path)
+		if err != nil {
+			t.Fatalf("%s: error: %v", testCase.path, err)
+		}
+		buf := make([]byte, stat.Size())
+		io.ReadFull(f, buf)
+		dcm, err := ParseFromBytes(buf)
+		if err != nil {
+			t.Fatalf("%s: error: %v", testCase.path, err)
+		}
+		// should have found all elements
+		if l := len(dcm.Elements); l != testCase.numElements {
+			t.Fatalf("%s: number of elements = %d (!= %d)", testCase.path, l, testCase.numElements)
+		}
+		// should be at end of buffer
+		if pos := dcm.elementStream.GetPosition(); pos != stat.Size() {
+			t.Fatalf("%s: reader position = %d (!= %d)", testCase.path, pos, stat.Size())
+		}
+
+		// check all elements values match correct type for their VR:
+		for _, e := range dcm.Elements {
+			val := e.Value()
+			if !valueTypeMatchesVR(e.VR, val) {
+				t.Fatalf(`%s: type "%s" for element %s is incorrect (VR="%s")`, testCase.path, reflect.TypeOf(val), e.Tag, e.VR)
+			}
+		}
+	}
+}
+
 // TestIssue6 attempts to parse a valid file, with a source VR of UN that is matches as non-UN in our dictionary.
 func TestIssue6(t *testing.T) {
 	t.Parallel()
@@ -287,6 +337,36 @@ func TestParseUnsupportedDicoms(t *testing.T) {
 	for _, file := range corruptFiles {
 		path := filepath.Join("testdata", "synthetic", file)
 		_, err := ParseDicom(path)
+		switch err.(type) {
+		case *UnsupportedDicom:
+		default:
+			t.Fatalf(`parsing dicom "%s" with unrecognised Transfer Syntax should have raised an UnsupportedDicom error (got %v)`, path, err)
+		}
+	}
+}
+
+//TestParseUnsupportedBuffers tests that, given unsupported or unrecognised inputs, the parser will fail in an controlled manner
+func TestParseUnsupportedBuffers(t *testing.T) {
+	t.Parallel()
+	// attempt to parse unsupported dicoms
+	corruptFiles := []string{
+		"UnrecognisedTransferSyntax.dcm",
+	}
+	for _, file := range corruptFiles {
+		path := filepath.Join("testdata", "synthetic", file)
+
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatalf("%s: error: %v", path, err)
+		}
+		stat, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("%s: error: %v", path, err)
+		}
+		buf := make([]byte, stat.Size())
+		io.ReadFull(f, buf)
+		_, err = ParseFromBytes(buf)
+
 		switch err.(type) {
 		case *UnsupportedDicom:
 		default:
