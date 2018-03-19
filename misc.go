@@ -50,56 +50,59 @@ type Config struct {
 	_set bool
 }
 
-func intFromEnv(key string) (int, bool) {
-	val, found := os.LookupEnv(key)
+// intFromEnv retrieves `key` from the OS environment.
+// if the key is not found, or cannot be expressed as an integer,
+// `found` will be false.
+func intFromEnv(key string) (val int, found bool) {
+	valStr, found := os.LookupEnv(key)
 	if !found {
-		return -1, false
+		return
 	}
-	valInt, err := strconv.Atoi(val)
+	val, err := strconv.Atoi(valStr)
 	if err != nil {
-		return -1, false
+		found = false
 	}
-	return valInt, true
+	return
 }
 
-func intFromEnvDefault(key string, def int) int {
+func intFromEnvDefault(key string, def int) (val int) {
 	val, found := intFromEnv(key)
-	if found {
-		return val
+	if !found {
+		val = def
 	}
-	return def
+	return
 }
 
 func strFromEnv(key string) (string, bool) {
 	return os.LookupEnv(key)
 }
 
-func strFromEnvDefault(key string, def string) string {
+func strFromEnvDefault(key string, def string) (val string) {
 	val, found := strFromEnv(key)
-	if found {
-		return val
-	}
-	return def
-}
-
-func boolFromEnv(key string) (bool, bool) {
-	val, found := os.LookupEnv(key)
 	if !found {
-		return false, false
+		val = def
 	}
-	valBool, err := strconv.ParseBool(val)
-	if err != nil {
-		return false, false
-	}
-	return valBool, true
+	return
 }
 
-func boolFromEnvDefault(key string, def bool) bool {
-	val, found := boolFromEnv(key)
-	if found {
-		return val
+func boolFromEnv(key string) (val bool, found bool) {
+	valStr, found := os.LookupEnv(key)
+	if !found {
+		return
 	}
-	return def
+	val, err := strconv.ParseBool(valStr)
+	if err != nil {
+		found = false
+	}
+	return
+}
+
+func boolFromEnvDefault(key string, def bool) (val bool) {
+	val, found := boolFromEnv(key)
+	if !found {
+		val = def
+	}
+	return
 }
 
 var config Config
@@ -144,19 +147,21 @@ const (
 	ansiMagenta = 35
 )
 
-func colourForLevel(level string) int {
+// colourForLevel returns the ANSI colour code for `level`
+func colourForLevel(level string) (ansiColour int) {
 	switch level {
 	case "D":
-		return ansiMagenta
+		ansiColour = ansiMagenta
 	case "I":
-		return ansiGreen
+		ansiColour = ansiGreen
 	case "W":
-		return ansiYellow
+		ansiColour = ansiYellow
 	case "E", "F":
-		return ansiRed
+		ansiColour = ansiRed
 	default:
-		return 0
+		ansiColour = 0
 	}
+	return
 }
 
 var (
@@ -167,12 +172,15 @@ var (
 	fatallog = newLogger("F", os.Stderr)
 )
 
+// awareLogger encapsulates a `log.Logger` to provide awareness of both
+// whether the logger is enabled, and whether the output is a character device.
 type awareLogger struct {
 	*log.Logger
 	Enabled           bool
 	IsCharacterDevice bool
 }
 
+// isCharacterDevice returns whether `f` is a character device (UNIX terminal)
 func isCharacterDevice(f *os.File) bool {
 	stat, err := f.Stat()
 	if err != nil {
@@ -300,6 +308,8 @@ func Fatal(v ...interface{}) {
 	}
 }
 
+// newLogger returns a new `awareLogger` for the given `level`.
+// logs to `output`.
 func newLogger(level string, output io.Writer) (al awareLogger) {
 	al.Enabled = true
 	fmtline := "|" + level + "| "

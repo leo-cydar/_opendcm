@@ -98,6 +98,8 @@ type ElementStream struct {
 	buffers
 }
 
+// buffers holds variables for temporary use
+// this is to ease pressure off the GC
 type buffers struct {
 	ui16b [2]byte
 	ui32b [4]byte
@@ -133,6 +135,8 @@ type VRSpecification struct {
 	CharsetRe          *regexp.Regexp
 }
 
+// RecognisedVRs lists all recognised VRs.
+// See ``6.2 Value Representation (VR)`` for more information
 var RecognisedVRs = []string{
 	"AE", "AS", "AT", "CS", "DA", "DS", "DT", "FL", "FD", "IS", "LO", "LT", "OB", "OD",
 	"OF", "OW", "PN", "SH", "SL", "SQ", "SS", "ST", "TM", "UI", "UL", "UN", "US", "UT",
@@ -200,7 +204,9 @@ func UnsupportedDicomError(format string, a ...interface{}) *UnsupportedDicom {
 ===============================================================================
 */
 
-func checkTransferSyntaxSupport(tsuid string) bool {
+// checkTransferSyntaxSupport checks whether the given Transfer Syntax UID `tsuid`
+// is listed as supported by OpenDCM.
+func checkTransferSyntaxSupport(tsuid string) (supported bool) {
 	switch tsuid {
 	case "1.2.840.10008.1.2", // Implicit VR Little Endian: Default Transfer Syntax for DICOM
 		"1.2.840.10008.1.2.1",    // Explicit VR Little Endian,
@@ -208,18 +214,17 @@ func checkTransferSyntaxSupport(tsuid string) bool {
 		"1.2.840.10008.1.2.4.91", // JPEG 2000 Image Compression,
 		"1.2.840.10008.1.2.4.90", // JPEG 2000 Image Compression (Lossless Only)
 		"1.2.840.10008.1.2.4.70": // Default Transfer Syntax for Lossless JPEG Image Compression
-		return true
-	default:
-		return false
+		supported = true
 	}
+	return
 }
 
 // SetFromUID sets the `TransferSyntax` UIDEntry and Encoding from the static dictionary
 // https://nathanleclaire.com/blog/2014/08/09/dont-get-bitten-by-pointer-vs-non-pointer-method-receivers-in-golang/
 func (ts *TransferSyntax) SetFromUID(uidstr string) error {
-	uidptr, err := LookupUID(uidstr)
-	if err != nil {
-		return err
+	uidptr, found := LookupUID(uidstr)
+	if !found {
+		return errors.New("could not find UID in records")
 	}
 	ts.UIDEntry = uidptr
 	ts.Encoding = GetEncodingForTransferSyntax(*ts)
@@ -251,8 +256,7 @@ var transferSyntaxToEncodingMap = map[string]*Encoding{
 // GetEncodingForTransferSyntax returns the encoding for a given TransferSyntax, or defaults.
 func GetEncodingForTransferSyntax(ts TransferSyntax) *Encoding {
 	if ts.UIDEntry != nil {
-		encoding, found := transferSyntaxToEncodingMap[ts.UIDEntry.UID]
-		if found {
+		if encoding, found := transferSyntaxToEncodingMap[ts.UIDEntry.UID]; found {
 			return encoding
 		}
 	}
@@ -297,6 +301,8 @@ var CharacterSetMap = map[string]*CharacterSet{
 	"GB18030":         {Name: "GB18030", Description: "Chinese (Simplified)", Encoding: simplifiedchinese.GB18030},
 }
 
+// decodeBytes attempts to decode `src` using `charset.decoder` (i.e. UTF-8 or ShiftJIS).
+// If there arises an issue decoding `src`, `error` will be non-nil.
 func decodeBytes(src []byte, charset *CharacterSet) (string, error) {
 	if charset == nil {
 		return string(src), nil
@@ -338,39 +344,39 @@ func IsCharacterStringVR(vr string) bool {
 	}
 }
 
+// splitCharacterStringVM splits `buffer` using "\" as delimiter.
 func splitCharacterStringVM(buffer []byte) [][]byte {
-	split := bytes.Split(buffer, []byte(`\`))
-	return split
+	return bytes.Split(buffer, []byte(`\`))
 }
 
-func splitBinaryVM(buffer []byte, nBytesEach int) [][]byte {
-	out := make([][]byte, 0)
+// splitBinaryVM splits `buffer` at `nBytesEach`.
+func splitBinaryVM(buffer []byte, nBytesEach int) (splitted [][]byte) {
 	pos := 0
 	for len(buffer) >= pos+nBytesEach {
-		out = append(out, buffer[pos:(pos+nBytesEach)])
+		splitted = append(splitted, buffer[pos:(pos+nBytesEach)])
 		pos += nBytesEach
 	}
-	return out
+	return
 }
 
 // LookupTag searches for the corresponding `dictionary.DicomDictionary` entry for the given tag uint32
-func LookupTag(t uint32) (*dictionary.DictEntry, bool) {
-	val, ok := dictionary.DicomDictionary[t]
-	if !ok {
+func LookupTag(t uint32) (entry *dictionary.DictEntry, found bool) {
+	entry, found = dictionary.DicomDictionary[t]
+	if !found {
 		tag := dictionary.Tag(t)
 		name := "Unknown" + tag.String()
-		return &dictionary.DictEntry{Tag: tag, Name: name, NameHuman: name, VR: "UN", VM: "1", Retired: false}, false
+		entry = &dictionary.DictEntry{Tag: tag, Name: name, NameHuman: name, VR: "UN", VM: "1", Retired: false}
 	}
-	return val, ok
+	return
 }
 
 // LookupUID searches for the corresponding `dictionary.UIDDictionary` entry for given uid string
-func LookupUID(uid string) (*dictionary.UIDEntry, error) {
-	val, ok := dictionary.UIDDictionary[uid]
-	if !ok {
-		return &dictionary.UIDEntry{}, errors.New("could not find UID")
+func LookupUID(uid string) (entry *dictionary.UIDEntry, found bool) {
+	entry, found = dictionary.UIDDictionary[uid]
+	if !found {
+		entry = &dictionary.UIDEntry{}
 	}
-	return val, nil
+	return
 }
 
 func (a ByTag) Len() int           { return len(a) }
@@ -414,6 +420,7 @@ func decodeContents(buffer []byte, e *Element) interface{} {
 	case "SH", "LO", "ST", "PN", "LT", "UT":
 		decoded, err := decodeBytes(buffer, e.sourceElementStream.CharacterSet)
 		if err != nil {
+			Warnf("error decoding %s with CharacterSet %s: %v", e.Tag, e.sourceElementStream.CharacterSet.Name)
 			return nil
 		}
 		return decoded
@@ -421,23 +428,15 @@ func decodeContents(buffer []byte, e *Element) interface{} {
 		return string(buffer)
 	case "AT":
 		if len(buffer) != 4 || len(buffer)%2 != 0 { // this should never happen, but if it does, return the original bytes
+			Warnf(`found "AT" element bad length (%d bytes). use with caution.`, len(buffer))
 			return buffer
 		}
-		var lower uint16
-		var upper uint16
-		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
-			lower = binary.LittleEndian.Uint16(buffer[0:2])
-			upper = binary.LittleEndian.Uint16(buffer[2:4])
-		} else {
-			lower = binary.BigEndian.Uint16(buffer[0:2])
-			upper = binary.BigEndian.Uint16(buffer[2:4])
-		}
-		tagUint32 := (uint32(lower) << 16) | uint32(upper)
+		tagUint32 := tagFromBytes(buffer[:4])
 		tag := dictionary.Tag(tagUint32)
 		return tag.String()
 	case "FL": // float
 		if len(buffer) < 4 {
-			goto InsufficientBytes
+			return nil
 		}
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
 			return math.Float32frombits(binary.LittleEndian.Uint32(buffer))
@@ -445,7 +444,7 @@ func decodeContents(buffer []byte, e *Element) interface{} {
 		return math.Float32frombits(binary.BigEndian.Uint32(buffer))
 	case "FD": // double
 		if len(buffer) < 8 {
-			goto InsufficientBytes
+			return nil
 		}
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
 			return math.Float64frombits(binary.LittleEndian.Uint64(buffer))
@@ -453,7 +452,7 @@ func decodeContents(buffer []byte, e *Element) interface{} {
 		return math.Float64frombits(binary.BigEndian.Uint64(e.value))
 	case "SS": // short
 		if len(buffer) < 2 {
-			goto InsufficientBytes
+			return nil
 		}
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
 			return int16(binary.LittleEndian.Uint16(buffer))
@@ -461,7 +460,7 @@ func decodeContents(buffer []byte, e *Element) interface{} {
 		return int16(binary.BigEndian.Uint16(buffer))
 	case "SL": // long
 		if len(buffer) < 4 {
-			goto InsufficientBytes
+			return nil
 		}
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
 			return int32(binary.LittleEndian.Uint32(buffer))
@@ -469,7 +468,7 @@ func decodeContents(buffer []byte, e *Element) interface{} {
 		return int32(binary.BigEndian.Uint32(buffer))
 	case "US": // ushort
 		if len(buffer) < 2 {
-			goto InsufficientBytes
+			return nil
 		}
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
 			return binary.LittleEndian.Uint16(buffer)
@@ -477,7 +476,7 @@ func decodeContents(buffer []byte, e *Element) interface{} {
 		return binary.BigEndian.Uint16(buffer)
 	case "UL": // ulong
 		if len(buffer) < 4 {
-			goto InsufficientBytes
+			return nil
 		}
 		if e.sourceElementStream.TransferSyntax.Encoding.LittleEndian {
 			return binary.LittleEndian.Uint32(buffer)
@@ -488,8 +487,6 @@ func decodeContents(buffer []byte, e *Element) interface{} {
 	default:
 		return buffer
 	}
-InsufficientBytes:
-	return nil
 }
 
 // Value returns an abstraction layer to the underlying bytestream according to VR
@@ -508,71 +505,53 @@ func (e Element) Value() interface{} {
 	       1.2: No:
 	           1.2.2: Return decoded contents
 	*/
-	// TODO: Check whether ValueBytes() is necessary, or whether e.value would suffice
-	valueBytes := e.ValueBytes()
 	if e.SupportsMultiVM() {
 		switch e.VR {
 		case "AE", "AS", "CS", "DA", "DS", "DT", "IS", "LO", "PN", "SH", "TM", "UI": // LT, ST, UT do not support multiVM
 			var outBuf []string
-			for _, v := range splitCharacterStringVM(valueBytes) {
+			for _, v := range splitCharacterStringVM(e.value) {
 				outBuf = append(outBuf, decodeContents(v, &e).(string))
 			}
 			return outBuf
 		case "FL":
 			var outBuf []float32
-			for _, v := range splitBinaryVM(valueBytes, 4) {
+			for _, v := range splitBinaryVM(e.value, 4) {
 				outBuf = append(outBuf, decodeContents(v, &e).(float32))
 			}
 			return outBuf
 		case "FD":
 			var outBuf []float64
-			for _, v := range splitBinaryVM(valueBytes, 8) {
+			for _, v := range splitBinaryVM(e.value, 8) {
 				outBuf = append(outBuf, decodeContents(v, &e).(float64))
 			}
 			return outBuf
 		case "SS":
 			var outBuf []int16
-			for _, v := range splitBinaryVM(valueBytes, 2) {
+			for _, v := range splitBinaryVM(e.value, 2) {
 				outBuf = append(outBuf, decodeContents(v, &e).(int16))
 			}
 			return outBuf
 		case "SL":
 			var outBuf []int32
-			for _, v := range splitBinaryVM(valueBytes, 4) {
+			for _, v := range splitBinaryVM(e.value, 4) {
 				outBuf = append(outBuf, decodeContents(v, &e).(int32))
 			}
 			return outBuf
 		case "US":
 			var outBuf []uint16
-			for _, v := range splitBinaryVM(valueBytes, 2) {
+			for _, v := range splitBinaryVM(e.value, 2) {
 				outBuf = append(outBuf, decodeContents(v, &e).(uint16))
 			}
 			return outBuf
 		case "UL":
 			var outBuf []uint32
-			for _, v := range splitBinaryVM(valueBytes, 4) {
+			for _, v := range splitBinaryVM(e.value, 4) {
 				outBuf = append(outBuf, decodeContents(v, &e).(uint32))
 			}
 			return outBuf
 		}
 	}
-	return decodeContents(valueBytes, &e)
-}
-
-// ValueBytes returns *all* bytes contained within an element's value, including sequences
-func (e Element) ValueBytes() []byte {
-	var buffer []byte
-	if e.value != nil && e.ValueLength > 0 {
-		return e.value
-	}
-	for _, item := range e.Items {
-		for _, v := range item.Elements {
-			//Debugf("Found element: %s", v.Tag)
-			buffer = append(buffer, v.ValueBytes()...)
-		}
-	}
-
-	return buffer
+	return decodeContents(e.value, &e)
 }
 
 /*
@@ -581,22 +560,17 @@ func (e Element) ValueBytes() []byte {
 ===============================================================================
 */
 
-// GetElement yields an `Element` from the active stream, and an `error` if something went wrong.
+// GetElement retrives an `Element` from the reader, and an `error` if something went wrong.
 func (es *ElementStream) GetElement() (Element, error) {
 	element := Element{}
 	element.sourceElementStream = es
 
 	startBytePos := es.GetPosition()
 	element.FileOffsetStart = startBytePos
-	lower, err := es.getUint16()
+	tagUint32, err := es.getTag()
 	if err != nil {
 		return element, CorruptElementError("GetElement(): %v", err)
 	}
-	upper, err := es.getUint16()
-	if err != nil {
-		return element, CorruptElementError("GetElement(): %v", err)
-	}
-	tagUint32 := (uint32(lower) << 16) | uint32(upper)
 	tag, _ := LookupTag(tagUint32)
 	element.DictEntry = tag
 	if es.TransferSyntax.Encoding.ImplicitVR {
@@ -634,7 +608,7 @@ func (es *ElementStream) GetElement() (Element, error) {
 		}
 	}
 	if element.ValueLength == 0xFFFFFFFF {
-		items, err := es.getSequence(element.VR == "SQ")
+		items, err := es.getUndefinedLength(element.VR == "SQ")
 		if err != nil {
 			return element, CorruptElementError("GetElement(): [%s] %v", tag.Tag, err)
 		}
@@ -691,76 +665,72 @@ func (es *ElementStream) GetElement() (Element, error) {
 	return element, nil
 }
 
-// getSequence parses a sequence of "undefined length" from the bytestream
-func (es *ElementStream) getSequence(parseElements bool) ([]Item, error) {
+// getUndefinedLength retrieves embedded `Item`s in an element of "undefined length" from the reader
+func (es *ElementStream) getUndefinedLength(parseElements bool) ([]Item, error) {
 	var items []Item
 	for {
-		lower, err := es.getUint16()
+		tagUint32, err := es.getTag()
 		if err != nil {
-			return items, CorruptElementStreamError("getSequence(): %v", err)
+			return items, CorruptElementStreamError("getUndefinedLength(): %v", err)
 		}
-		upper, err := es.getUint16()
-		if err != nil {
-			return items, CorruptElementStreamError("getSequence(): %v", err)
-		}
-		tagUint32 := (uint32(lower) << 16) | uint32(upper)
 		if tagUint32 == 0xFFFEE0DD {
 			err := es.skipBytes(4)
 			if err != nil {
-				return items, CorruptElementStreamError("getSequence(): %v", err)
+				return items, CorruptElementStreamError("getUndefinedLength(): %v", err)
 			}
 			break
 		}
 		if tagUint32 != 0xFFFEE000 {
-			return items, CorruptElementStreamError("getSequence(): 0x%08X != 0xFFFEE000 (%d)", tagUint32, es.GetPosition())
+			return items, CorruptElementStreamError("getUndefinedLength(): 0x%08X != 0xFFFEE000 (%d)", tagUint32, es.GetPosition())
 		}
+
+		// try to retrieve element length from the reader
 		length, err := es.getUint32()
 		if err != nil {
-			return items, CorruptElementStreamError("getSequence(): %v", err)
+			return items, CorruptElementStreamError("getUndefinedLength(): %v", err)
 		}
 
 		var elements = make(map[uint32]Element)
 		var unparsed = make([]byte, 0)
 		if length == 0xFFFFFFFF { // undefined length item
 			// find next FFFE, E00D = data for item ends
-			var delimitationItemBytes []byte
+			var delimitationItemBytes [4]byte
 			if es.TransferSyntax.Encoding.LittleEndian {
-				delimitationItemBytes = []byte{0xFE, 0xFF, 0x0D, 0xE0}
+				delimitationItemBytes = [4]byte{0xFE, 0xFF, 0x0D, 0xE0}
 			} else {
-				delimitationItemBytes = []byte{0xFF, 0xFE, 0xE0, 0x0D}
+				delimitationItemBytes = [4]byte{0xFF, 0xFE, 0xE0, 0x0D}
 			}
 
 			for {
-				// try to grab an element according to current TransferSyntax
+				// try to decode an element from the bytestream
 				e, err := es.GetElement()
 				if err != nil {
 					switch err.(type) {
 					case *CorruptElement:
-						return nil, CorruptElementStreamError("getSequence(): %v", err)
+						return nil, CorruptElementStreamError("getUndefinedLength(): %v", err)
 					case *UnsupportedDicom:
-						return nil, UnsupportedDicomError("getSequence(): %v", err)
+						return nil, UnsupportedDicomError("getUndefinedLength(): %v", err)
 					default:
 						panic(err)
 					}
 				}
 				elements[uint32(e.Tag)] = e
-				check, err := es.reader.Peek(4)
-				if err != nil {
-					return items, CorruptElementStreamError("getSequence(): %v", err)
-				}
-				if bytes.Equal(check, delimitationItemBytes) {
+
+				// peek four bytes to see whether we have reached the delimitation item
+				if check, err := es.reader.Peek(4); err != nil {
+					return items, CorruptElementStreamError("getUndefinedLength(): %v", err)
+				} else if bytes.Equal(check, delimitationItemBytes[:]) {
 					// end
 					break
 				}
 			}
 
 			// now we must skip eight bytes (delimitation item + 0x00{4}) (see: NEMA Table 7.5-3)
-			err = es.skipBytes(8)
-			if err != nil {
-				return items, CorruptElementStreamError("getSequence(): %v", err)
+			if err = es.skipBytes(8); err != nil {
+				return items, CorruptElementStreamError("getUndefinedLength(): %v", err)
 			}
 		} else {
-			// try to grab an element according to current TransferSyntax
+			// try to grab an element from the bytestream
 			if length == 0 {
 				continue
 				/* Turns out the data set had bytes:
@@ -775,9 +745,9 @@ func (es *ElementStream) getSequence(parseElements bool) ([]Item, error) {
 				if err != nil {
 					switch err.(type) {
 					case *CorruptElement:
-						return nil, CorruptElementStreamError("getSequence(): %v", err)
+						return nil, CorruptElementStreamError("getUndefinedLength(): %v", err)
 					case *UnsupportedDicom:
-						return nil, UnsupportedDicomError("getSequence(): %v", err)
+						return nil, UnsupportedDicomError("getUndefinedLength(): %v", err)
 					default:
 						panic(err)
 					}
@@ -786,17 +756,17 @@ func (es *ElementStream) getSequence(parseElements bool) ([]Item, error) {
 			} else {
 				unparsed, err = es.getBytes(uint(length))
 				if err != nil {
-					return items, CorruptElementStreamError("getSequence(): %v", err)
+					return items, CorruptElementStreamError("getUndefinedLength(): %v", err)
 				}
 			}
 		}
 		item := Item{Elements: elements, Unparsed: unparsed}
 		items = append(items, item)
 	}
-
 	return items, nil
 }
 
+// skipBytes fast-forwards the reader `num` bytes
 func (es *ElementStream) skipBytes(num int) (err error) {
 	if num == 0 {
 		return nil
@@ -825,6 +795,7 @@ func (es *ElementStream) GetRemainingBytes() int64 {
 	return es.readerSize - es.readerPos
 }
 
+// getUint16 retrieves a uint16 (two bytes) from the reader
 func (es *ElementStream) getUint16() (res uint16, err error) {
 	if numRemaining := es.GetRemainingBytes(); numRemaining < 2 {
 		return 0, CorruptElementStreamError("getUint16(): would exceed buffer size (%d bytes)", numRemaining)
@@ -845,6 +816,7 @@ func (es *ElementStream) getUint16() (res uint16, err error) {
 	return
 }
 
+// getUint32 retrieves a uint32 (four bytes) from the reader
 func (es *ElementStream) getUint32() (res uint32, err error) {
 	if numRemaining := es.GetRemainingBytes(); numRemaining < 4 {
 		return 0, CorruptElementStreamError("getUint32(): would exceed buffer size (%d bytes)", numRemaining)
@@ -865,6 +837,29 @@ func (es *ElementStream) getUint32() (res uint32, err error) {
 	return
 }
 
+// tagFromBytes returns a tag uint32 from an array of bytes. length should be at least four.
+func tagFromBytes(buf []byte) uint32 {
+	return (uint32(binary.LittleEndian.Uint16(buf[0:2])) << 16) | uint32(binary.LittleEndian.Uint16(buf[2:4]))
+}
+
+// getTag retrieves a tag uint32 from the reader
+func (es *ElementStream) getTag() (tag uint32, err error) {
+	if numRemaining := es.GetRemainingBytes(); numRemaining < 4 {
+		return 0, CorruptElementStreamError("getUint32(): would exceed buffer size (%d bytes)", numRemaining)
+	}
+	es.nread, err = io.ReadFull(es.reader, es.ui32b[:])
+	if err != nil {
+		return 0, CorruptElementStreamError("getUint32(): %v", err)
+	}
+	es.readerPos += int64(es.nread)
+	if es.nread != 4 {
+		return 0, CorruptElementStreamError("getUint32(): nread = %d (!= 4)", es.nread)
+	}
+	tag = tagFromBytes(es.ui32b[:])
+	return
+}
+
+// getBytes retrieves `num` bytes from the reader
 func (es *ElementStream) getBytes(num uint) ([]byte, error) {
 	if num == 0 {
 		return []byte{}, nil
@@ -906,7 +901,10 @@ func (es *ElementStream) SetTransferSyntax(transferSyntaxUID string) {
 ===============================================================================
 */
 
-func (df *Dicom) getPreamble() ([]byte, bool) {
+// getPreamble retrieves the 128 byte preamble at the start of each dicom file
+// if the preamble does not exist, or the magic string immediately following preamble
+// is not "DICM", `found` will be false.
+func (df *Dicom) getPreamble() (preamble []byte, found bool) {
 	preamble, err := df.elementStream.reader.Peek(132)
 	if err != nil {
 		return preamble, false
@@ -921,6 +919,8 @@ func (df *Dicom) getPreamble() ([]byte, bool) {
 	return preamble[:128], true
 }
 
+// crawlMeta attempts to retrieve all "meta" elements from the reader.
+// See ``7.1 DICOM File Meta Information`` for more information.
 func (df *Dicom) crawlMeta() error {
 	preamble, preambleFound := df.getPreamble()
 	if preambleFound {
@@ -987,6 +987,8 @@ func (df *Dicom) guessTransferSyntax() (encoding Encoding, success bool) {
 	return
 }
 
+// crawlElements attempts to retrieve all remaining elements from the reader.
+// See ``7.1 Data Elements`` for more information.
 func (df *Dicom) crawlElements() error {
 	// change transfer syntax if necessary
 	tsElement, found := df.GetElement(0x00020010)
