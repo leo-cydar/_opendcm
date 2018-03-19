@@ -15,7 +15,6 @@ import (
 	"sync"
 
 	"github.com/b71729/opendcm/dictionary"
-	"github.com/rs/zerolog/log"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/encoding/japanese"
@@ -219,7 +218,7 @@ func (ts *TransferSyntax) SetFromUID(uidstr string) error {
 	}
 	ts.UIDEntry = uidptr
 	ts.Encoding = GetEncodingForTransferSyntax(*ts)
-	//log.Debug().Str("syntax", ts.Encoding.String()).Msgf("switched transfer syntax %s", uidstr)
+	//Debugf("switched transfer syntax to %s", uidstr)
 	return nil
 }
 
@@ -563,7 +562,7 @@ func (e Element) ValueBytes() []byte {
 	}
 	for _, item := range e.Items {
 		for _, v := range item.Elements {
-			//log.Printf("Found element: %s", v.Tag)
+			//Debugf("Found element: %s", v.Tag)
 			buffer = append(buffer, v.ValueBytes()...)
 		}
 	}
@@ -651,11 +650,8 @@ func (es *ElementStream) GetElement() (Element, error) {
 						return element, err
 					}
 					// not running in safe mode, we can truncate the buffer to remaining bytes
-					log.Warn().
-						Str("tag", element.Tag.String()).
-						Uint32("from", element.ValueLength).
-						Int64("to", es.GetRemainingBytes()).
-						Msg("element value length truncated due to reaching end of the file. use with caution.")
+					Warnf("element %s: value length truncated from %d bytes to %d bytes due to reaching end of the file. use with caution.",
+						element.Tag, element.ValueLength, es.GetRemainingBytes())
 					element.ValueLength = uint32(es.GetRemainingBytes())
 					valuebuf, err = es.getBytes(uint(element.ValueLength))
 					if err != nil {
@@ -911,7 +907,7 @@ func (df *Dicom) crawlMeta() error {
 	if preambleFound {
 		copy(df.Preamble[:], preamble)
 	} else {
-		log.Warn().Msg("Missing preamble (bytes 0-128)")
+		Debug("file is missing preamble (bytes 0-128")
 		if GetConfig().StrictMode {
 			return CorruptDicomError("crawlMeta: no dicom preamble found")
 		}
@@ -925,7 +921,7 @@ func (df *Dicom) crawlMeta() error {
 		}
 		nextUpper := binary.LittleEndian.Uint16(nextUpperBytes)
 		if nextUpper != 0x0002 {
-			log.Debug().Msgf("Exiting meta (nextUpper = %04X)", nextUpper)
+			Debugf("exiting meta (nextUpper = %04X)", nextUpper)
 			df.TotalMetaBytes = df.elementStream.GetPosition()
 			break
 		}
@@ -985,10 +981,10 @@ func (df *Dicom) crawlElements() error {
 		df.elementStream.SetTransferSyntax("1.2.840.10008.1.2")
 		encoding, success := df.guessTransferSyntax()
 		if success {
-			log.Debug().Bool("ImplicitVR", encoding.ImplicitVR).Bool("LittleEndian", encoding.LittleEndian).Msgf("guessed transfer syntax")
 			df.elementStream.TransferSyntax.Encoding = &encoding
+			Debugf("guessed transfer syntax encoding: %s", df.elementStream.TransferSyntax.Encoding)
 		} else {
-			return CorruptDicomError("crawlElements(): missing transfer syntax tag in file, and could not guess transfer syntax")
+			return CorruptDicomError("missing transfer syntax tag in file, and could not guess transfer syntax")
 		}
 	}
 	for {

@@ -19,10 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
-
-	"github.com/b71729/opendcm"
+	. "github.com/b71729/opendcm"
 	"github.com/b71729/opendcm/dictionary"
 )
 
@@ -30,24 +27,20 @@ var baseFile = filepath.Base(os.Args[0])
 
 func check(err error) {
 	if err != nil {
-		log.Fatal().Err(err).Msg("check()")
+		FatalfDepth(3, "error: %v", err)
 	}
 }
 
-// IsAPipe returns whether the given `io.Writer` is a pipe
-func IsAPipe(w io.Writer) bool {
-	fi, err := os.Stdout.Stat()
+// IsAPipe returns whether the given `os.File` is a pipe
+func IsAPipe(f *os.File) bool {
+	fi, err := f.Stat()
 	check(err)
 	return (fi.Mode() & os.ModeCharDevice) == 0
 }
 
 func main() {
-	if IsAPipe(os.Stdout) { // output should not be colorized
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout, NoColor: true})
-	} else {
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
-	}
-	log.Info().Str("version", opendcm.OpenDCMVersion).Msg("opendcm")
+	GetConfig()
+	Infof("OpenDCM version %s", OpenDCMVersion)
 	if len(os.Args) == 1 || (os.Args[1] == "--help" || os.Args[1] == "-h") {
 		goto usage
 	} else {
@@ -69,7 +62,7 @@ func main() {
 	}
 	return
 usage:
-	log.Fatal().Msgf("usage: %s [%s] [flags]", baseFile, strings.Join([]string{"view", "reduce", "gendatadict", "createdicom", "simulate"}, " / "))
+	Fatalf("usage: %s [%s] [flags]", baseFile, strings.Join([]string{"view", "reduce", "gendatadict", "createdicom", "simulate"}, " / "))
 }
 
 /*
@@ -81,7 +74,7 @@ usage:
 // StartSimulate simulates load over time
 func StartSimulate() {
 	var files []string
-	opendcm.ConcurrentlyWalkDir(os.Args[2], func(file string) {
+	ConcurrentlyWalkDir(os.Args[2], func(file string) {
 		files = append(files, file)
 	})
 	flen := len(files)
@@ -92,20 +85,17 @@ func StartSimulate() {
 			time.Sleep(time.Second * 3)
 
 			elapsed := time.Now().Sub(start)
-			log.Debug().
-				Float64("apd", math.Round(float64(opendcm.Nalloc)/elapsed.Seconds())).
-				Float64("dps", math.Round(float64(ntotal)/elapsed.Seconds())).
-				Msg("Running...")
+			Debugf("running... apd=%v, dps=%v", math.Round(float64(Nalloc)/elapsed.Seconds()), math.Round(float64(ntotal)/elapsed.Seconds()))
 
 			var memStats runtime.MemStats
 			runtime.ReadMemStats(&memStats)
 
-			log.Debug().Msgf("memory: %d kB / %d kB", memStats.Alloc/1024, memStats.Sys/1024)
+			Debugf("memory: %d kB / %d kB", memStats.Alloc/1024, memStats.Sys/1024)
 		}
 	}()
 	for {
 		n := rand.Intn(flen)
-		opendcm.ParseDicom(files[n])
+		ParseDicom(files[n])
 		ntotal++
 	}
 }
@@ -167,9 +157,7 @@ func parseDataElements(data string) (elements []dictionary.DictEntry) {
 				elements[index].VR = token[:2]
 			default:
 				elements[index].VR = "UN"
-				log.Warn().
-					Str("tag", elements[index].Tag.String()).
-					Msgf("using 'UN' as VR instead of '%s'", token)
+				Warnf(`using "UN" as VR instead of "%s" for tag "%s"`, token, elements[index].Tag)
 			}
 		case 5:
 			orIndex := strings.Index(token, " or")
@@ -177,9 +165,7 @@ func parseDataElements(data string) (elements []dictionary.DictEntry) {
 				token = token[:orIndex]
 			}
 			if !acceptibleVM.Match([]byte(token)) {
-				log.Warn().
-					Str("tag", elements[index].Tag.String()).
-					Msgf("using 'n' as VM instead of '%s'", token)
+				Warnf(`using "n" as VM instead of "%s" for tag "%s"`, token, elements[index].Tag)
 				token = "n"
 			}
 			elements[index].VM = token
@@ -231,7 +217,7 @@ func tableBodyPosition(data string) (posStart int, posEnd int, err error) {
 // StartGenDataDict generates data dictionary
 func StartGenDataDict() {
 	if len(os.Args) != 3 {
-		log.Fatal().Msgf("usage: %s gendatadict dictFromNEMA.xml", baseFile)
+		Fatalf("usage: %s gendatadict dictFromNEMA.xml", baseFile)
 	}
 
 	// read input XML file to buffer
@@ -256,7 +242,7 @@ func StartGenDataDict() {
 	check(err)
 
 	dataElements := parseDataElements(data[posStart+7 : posEnd])
-	log.Info().Int("num", len(dataElements)).Msg("found data elements")
+	Infof("found %d data elements", len(dataElements))
 
 	// file meta elements
 	data = data[posEnd+8:]
@@ -264,7 +250,7 @@ func StartGenDataDict() {
 	check(err)
 
 	fileMetaElements := parseDataElements(data[posStart+7 : posEnd])
-	log.Info().Int("num", len(fileMetaElements)).Msg("found file meta elements")
+	Infof("found %d file meta elements", len(fileMetaElements))
 
 	// directory structure elements
 	data = data[posEnd+8:]
@@ -272,7 +258,7 @@ func StartGenDataDict() {
 	check(err)
 
 	dirStructElements := parseDataElements(data[posStart+7 : posEnd])
-	log.Info().Int("num", len(dirStructElements)).Msg("found directory structure elements")
+	Infof("found %d directory structure elements", len(dirStructElements))
 
 	// UIDs
 	data = data[posEnd+8:]
@@ -280,7 +266,7 @@ func StartGenDataDict() {
 	check(err)
 
 	UIDs := parseUIDs(data[posStart+7 : posEnd])
-	log.Info().Int("num", len(UIDs)).Msg("found unique identifiers (UIDs)")
+	Infof("found %d unique identifiers (UIDs)", len(UIDs))
 
 	// build golang string
 	outF, err := os.Create("datadict.go")
@@ -345,7 +331,7 @@ var UIDDictionary = map[string]*UIDEntry{
 	// write to disk
 	_, err = outF.WriteString(outCode)
 	check(err)
-	log.Info().Str("file", "datadict.go").Msg("wrote file OK")
+	Info(`wrote dictionary to "datadict.go"`)
 }
 
 /*
@@ -417,9 +403,9 @@ func generateElementWithLength(tagString string, value []byte, VR string, length
 }
 
 // TODO: move to common
-func elementFromBuffer(buf []byte) (opendcm.Element, error) {
+func elementFromBuffer(buf []byte) (Element, error) {
 	r := bufio.NewReader(bytes.NewReader(buf))
-	es := opendcm.NewElementStream(r, int64(len(buf)))
+	es := NewElementStream(r, int64(len(buf)))
 	return es.GetElement()
 }
 
@@ -439,7 +425,7 @@ func writeMeta() []byte {
 	buffer = append(buffer, elementBytes...)
 
 	// 0002,0003 Media Storage SOP Instance UID
-	randUID, err := opendcm.NewRandInstanceUID()
+	randUID, err := NewRandInstanceUID()
 	check(err)
 	elementBytes, err = generateElement("0002,0003", []byte(randUID), "UI")
 	check(err)
@@ -451,12 +437,12 @@ func writeMeta() []byte {
 	buffer = append(buffer, elementBytes...)
 
 	// 0002,0012 Implementation Class UID
-	elementBytes, err = generateElement("0002,0012", []byte(opendcm.GetImplementationUID(true)), "UI")
+	elementBytes, err = generateElement("0002,0012", []byte(GetImplementationUID(true)), "UI")
 	check(err)
 	buffer = append(buffer, elementBytes...)
 
 	// (0002,0013)    Implementation Version Name    opendcm-0.1
-	elementBytes, err = generateElement("0002,0013", []byte(fmt.Sprintf("opendcm-%s", opendcm.OpenDCMVersion)), "SH")
+	elementBytes, err = generateElement("0002,0013", []byte(fmt.Sprintf("opendcm-%s", OpenDCMVersion)), "SH")
 	check(err)
 	buffer = append(buffer, elementBytes...)
 
@@ -473,11 +459,11 @@ func writeMeta() []byte {
 // This allows for the creation of synthetic dicom files. Primary usage is for unit tests and verification of bugs.
 func StartCreateDicom() {
 	if len(os.Args) != 3 {
-		log.Fatal().Msgf("usage: %s createdicom out_file", baseFile)
+		Fatalf("usage: %s createdicom out_file", baseFile)
 	}
 	outFileName := os.Args[2]
 	if _, err := os.Stat(outFileName); err == nil {
-		log.Fatal().Str("file", outFileName).Msg("file already exists")
+		Fatalf(`file "%s" already exists`, outFileName)
 	}
 
 	buffer := writeMeta()
@@ -488,10 +474,10 @@ func StartCreateDicom() {
 	nwrite, err := f.Write(buffer)
 	check(err)
 	if nwrite != len(buffer) {
-		log.Fatal().Int("nwrite", nwrite).Int("size", len(buffer)).Msg("could not write all metadata to file")
+		Fatalf("could not write all meta elements to disk. nwrite=%d bytes, size=%d bytes", nwrite, len(buffer))
 	}
 
-	log.Info().Msg("wrote meta information ok")
+	Info("wrote meta information to disk")
 
 	elementBuffer := make([]byte, 0)
 
@@ -690,10 +676,10 @@ func StartCreateDicom() {
 	nwrite, err = f.Write(elementBuffer)
 	check(err)
 	if nwrite != len(elementBuffer) {
-		log.Fatal().Int("nwrite", nwrite).Int("size", len(elementBuffer)).Msg("could not write all elements to file")
+		Fatalf("could not write all elements to disk. nwrite=%d bytes, size=%d bytes", nwrite, len(elementBuffer))
 	}
 
-	log.Info().Msg("wrote elements ok")
+	Info("wrote elements to disk")
 
 	defer f.Close()
 }
@@ -756,7 +742,7 @@ func copy(src, dst string) error {
 //   to the output directory.
 func StartReduce() {
 	if len(os.Args) != 4 {
-		log.Fatal().Msgf("usage: %s reduce in_dir out_dir", baseFile)
+		Fatalf("usage: %s reduce in_dir out_dir", baseFile)
 	}
 	dirIn := os.Args[2]
 	dirOut := os.Args[3]
@@ -764,24 +750,24 @@ func StartReduce() {
 	statIn, err := os.Stat(dirIn)
 	check(err)
 	if !statIn.IsDir() {
-		log.Fatal().Str("parameter", dirIn).Msg("input is not a directory. please provide a directory.")
+		Fatalf(`"%s" is not a directory. please provide a directory`, dirIn)
 	}
 
 	statOut, err := os.Stat(dirOut)
 	check(err)
 	if !statOut.IsDir() {
-		log.Fatal().Str("parameter", dirOut).Msg("input is not a directory. please provide a directory.")
+		Fatalf(`"%s" is not a directory. please provide a directory`, dirOut)
 	}
 
 	seriesInstanceUIDs := make(map[string]bool, 0)
-	opendcm.ConcurrentlyWalkDir(dirIn, func(filePath string) {
-		dcm, err := opendcm.ParseDicom(filePath)
+	ConcurrentlyWalkDir(dirIn, func(filePath string) {
+		dcm, err := ParseDicom(filePath)
 		check(err)
 		if e, found := dcm.GetElement(0x0020000E); found {
 			if val, ok := e.Value().(string); ok {
 				_, found := seriesInstanceUIDs[val]
 				if !found {
-					log.Info().Str("seriesinstanceuid", val).Msg("found unique")
+					Infof("found unique: %s", val)
 					seriesInstanceUIDs[val] = true
 					outputFilePath := filepath.Join(dirOut, fmt.Sprintf("%s.dcm", val))
 					if _, err := os.Stat(outputFilePath); os.IsNotExist(err) {
@@ -789,7 +775,7 @@ func StartReduce() {
 						err := copy(dcm.FilePath, outputFilePath)
 						check(err)
 					} else {
-						log.Info().Str("path", outputFilePath).Msg("skip: file exists")
+						Infof(`skip "%s": file exists`, outputFilePath)
 					}
 				}
 			}
@@ -807,31 +793,32 @@ func StartReduce() {
 // This allows for viewing of a dicom file (listing of its elements and their values)
 func StartViewDicom() {
 	if len(os.Args) != 3 {
-		log.Fatal().Msgf("usage: %s view file_or_dir", baseFile)
+		Fatalf("usage: %s view file_or_dir", baseFile)
 	}
 	stat, err := os.Stat(os.Args[2])
 	check(err)
 	if isDir := stat.IsDir(); !isDir {
-		dcm, err := opendcm.ParseDicom(os.Args[2])
+		dcm, err := ParseDicom(os.Args[2])
 		check(err)
-		var elements []opendcm.Element
+		var elements []Element
 		for _, v := range dcm.Elements {
 			elements = append(elements, v)
 		}
-		sort.Sort(opendcm.ByTag(elements))
+		sort.Sort(ByTag(elements))
 		for _, element := range elements {
 			description := element.Describe(0)
 			for _, line := range description {
-				log.Info().Msg(line)
+				Info(line)
 			}
 		}
 	} else {
-		err := opendcm.ConcurrentlyWalkDir(os.Args[2], func(path string) {
-			_, err := opendcm.ParseDicom(path)
+		err := ConcurrentlyWalkDir(os.Args[2], func(path string) {
+			_, err := ParseDicom(path)
+			basePath := filepath.Base(path)
 			if err == nil {
-				log.Info().Str("file", filepath.Base(path)).Msg("parsed ok")
+				Infof(`parsed "%s"`, basePath)
 			} else {
-				log.Error().Str("file", filepath.Base(path)).Err(err).Msg("parser error")
+				Infof(`error parsing "%s": %v`, basePath, err)
 			}
 		})
 		check(err)
