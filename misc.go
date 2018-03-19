@@ -28,6 +28,9 @@ const OpenDCMRootUID = "1.2.826.0.1.3680043.9.7484."
 // It is used commonly in creating ImplementationClassUID(0002,0012)
 const OpenDCMVersion = "0.1"
 
+// ExitOnFatalLog specifies whether the application should `os.Exit(1)` on a fatal log message
+var ExitOnFatalLog = true
+
 // Config represents the application configuration
 type Config struct {
 	Version       string
@@ -255,7 +258,9 @@ func Fatalf(format string, v ...interface{}) {
 		}
 		debug.PrintStack()
 	}
-	os.Exit(1)
+	if ExitOnFatalLog {
+		os.Exit(1)
+	}
 }
 
 // FatalfDepth calls `fatallog.Output` to print to the logger.
@@ -272,7 +277,9 @@ func FatalfDepth(calldepth int, format string, v ...interface{}) {
 		}
 		debug.PrintStack()
 	}
-	os.Exit(1)
+	if ExitOnFatalLog {
+		os.Exit(1)
+	}
 }
 
 // Fatal calls `fatallog.Output` to print to the logger.
@@ -288,7 +295,9 @@ func Fatal(v ...interface{}) {
 		}
 		debug.PrintStack()
 	}
-	os.Exit(1)
+	if ExitOnFatalLog {
+		os.Exit(1)
+	}
 }
 
 func newLogger(level string, output io.Writer) (al awareLogger) {

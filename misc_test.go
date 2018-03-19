@@ -1,6 +1,7 @@
 package opendcm
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -224,4 +225,161 @@ func TestNewRandInstanceUID(t *testing.T) {
 		t.Fatalf("uid did not start with OpenDCMRootUID")
 	}
 
+}
+
+func TestColourForLevel(t *testing.T) {
+	t.Parallel()
+	if colour := colourForLevel("D"); colour != ansiMagenta {
+		t.Fatal("got wrong colour for logging level 'D'")
+	}
+	if colour := colourForLevel("I"); colour != ansiGreen {
+		t.Fatal("got wrong colour for logging level 'I'")
+	}
+	if colour := colourForLevel("W"); colour != ansiYellow {
+		t.Fatal("got wrong colour for logging level 'W'")
+	}
+	if colour := colourForLevel("E"); colour != ansiRed {
+		t.Fatal("got wrong colour for logging level 'E'")
+	}
+	if colour := colourForLevel("F"); colour != ansiRed {
+		t.Fatal("got wrong colour for logging level 'F'")
+	}
+	if colour := colourForLevel("T"); colour != 0 {
+		t.Fatal("got wrong colour for unknown logging level 'T'")
+	}
+}
+
+func getLogEntries(buf *bytes.Buffer) []string {
+	logEntriesBytes := bytes.Split(buf.Bytes(), []byte("\n"))
+	logEntries := make([]string, 0)
+	for _, entry := range logEntriesBytes {
+		if len(entry) == 0 || entry[0] == []byte("\r")[0] {
+			continue
+		}
+		logEntries = append(logEntries, string(entry))
+	}
+	return logEntries
+}
+
+func TestDebugLoggerEnabled(t *testing.T) {
+	SetLoggingLevel("debug")
+	buf := bytes.NewBuffer(make([]byte, 0))
+	debuglog.SetOutput(buf)
+	Debugf("%s", "message")
+	Debug("message")
+	logEntries := getLogEntries(buf)
+	if len(logEntries) != 2 {
+		t.Fatalf("got %d log entries (!= 2)", len(logEntries))
+	}
+}
+
+func TestDebugLoggerDisabled(t *testing.T) {
+	SetLoggingLevel("info")
+	buf := bytes.NewBuffer(make([]byte, 0))
+	debuglog.SetOutput(buf)
+	Debugf("%s", "message")
+	Debug("message")
+	logEntries := getLogEntries(buf)
+	if len(logEntries) != 0 {
+		t.Fatalf("got %d log entries (!= 0)", len(logEntries))
+	}
+}
+
+func TestInfoLoggerEnabled(t *testing.T) {
+	SetLoggingLevel("info")
+	buf := bytes.NewBuffer(make([]byte, 0))
+	infolog.SetOutput(buf)
+	Infof("%s", "message")
+	Info("message")
+	logEntries := getLogEntries(buf)
+	if len(logEntries) != 2 {
+		t.Fatalf("got %d log entries (!= 2)", len(logEntries))
+	}
+}
+
+func TestInfoLoggerDisabled(t *testing.T) {
+	SetLoggingLevel("warn")
+	buf := bytes.NewBuffer(make([]byte, 0))
+	infolog.SetOutput(buf)
+	Infof("%s", "message")
+	Info("message")
+	logEntries := getLogEntries(buf)
+	if len(logEntries) != 0 {
+		t.Fatalf("got %d log entries (!= 0)", len(logEntries))
+	}
+}
+
+func TestWarnLoggerEnabled(t *testing.T) {
+	SetLoggingLevel("warn")
+	buf := bytes.NewBuffer(make([]byte, 0))
+	warnlog.SetOutput(buf)
+	Warnf("%s", "message")
+	Warn("message")
+	logEntries := getLogEntries(buf)
+	if len(logEntries) != 2 {
+		t.Fatalf("got %d log entries (!= 2)", len(logEntries))
+	}
+}
+
+func TestWarnLoggerDisabled(t *testing.T) {
+	SetLoggingLevel("error")
+	buf := bytes.NewBuffer(make([]byte, 0))
+	warnlog.SetOutput(buf)
+	Warnf("%s", "message")
+	Warn("message")
+	logEntries := getLogEntries(buf)
+	if len(logEntries) != 0 {
+		t.Fatalf("got %d log entries (!= 0)", len(logEntries))
+	}
+}
+func TestErrorLoggerEnabled(t *testing.T) {
+	SetLoggingLevel("error")
+	buf := bytes.NewBuffer(make([]byte, 0))
+	errorlog.SetOutput(buf)
+	Errorf("%s", "message")
+	Error("message")
+	logEntries := getLogEntries(buf)
+	if len(logEntries) != 2 {
+		t.Fatalf("got %d log entries (!= 2)", len(logEntries))
+	}
+}
+
+func TestErrorLoggerDisabled(t *testing.T) {
+	SetLoggingLevel("fatal")
+	buf := bytes.NewBuffer(make([]byte, 0))
+	errorlog.SetOutput(buf)
+	Errorf("%s", "message")
+	Error("message")
+	logEntries := getLogEntries(buf)
+	if len(logEntries) != 0 {
+		t.Fatalf("got %d log entries (!= 0)", len(logEntries))
+	}
+}
+
+func TestFatalLoggerEnabled(t *testing.T) {
+	SetLoggingLevel("fatal")
+	ExitOnFatalLog = false // important
+	buf := bytes.NewBuffer(make([]byte, 0))
+	fatallog.SetOutput(buf)
+	Fatalf("%s", "message")
+	Fatal("message")
+	FatalfDepth(1, "%s", "message with depth")
+	logEntries := getLogEntries(buf)
+	if len(logEntries) != 3 {
+		t.Fatalf("got %d log entries (!= 3)", len(logEntries))
+	}
+}
+
+func TestFatalLoggerDisabled(t *testing.T) {
+	SetLoggingLevel("none")
+	ExitOnFatalLog = false // important
+	buf := bytes.NewBuffer(make([]byte, 0))
+	fatallog.SetOutput(buf)
+	Fatalf("%s", "message")
+	Fatal("message")
+	FatalfDepth(1, "%s", "message with depth")
+	logEntries := getLogEntries(buf)
+	if len(logEntries) != 0 {
+		t.Fatalf("got %d log entries (!= 0)", len(logEntries))
+	}
 }
