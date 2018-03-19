@@ -307,7 +307,6 @@ func TestStrictModeEnabled(t *testing.T) {
 	OverrideConfig(cfg)
 	testCases := []string{
 		filepath.Join("testdata", "synthetic", "CorruptOverflowElementLength.dcm"),
-		filepath.Join("testdata", "synthetic", "MissingPreambleMagic.dcm"),
 	}
 	for _, testCase := range testCases {
 		_, err := ParseDicom(testCase)
@@ -325,7 +324,6 @@ func TestStrictModeDisabled(t *testing.T) {
 	OverrideConfig(cfg)
 	testCases := []string{
 		filepath.Join("testdata", "synthetic", "CorruptOverflowElementLength.dcm"),
-		filepath.Join("testdata", "synthetic", "MissingPreambleMagic.dcm"),
 	}
 	for _, testCase := range testCases {
 		_, err := ParseDicom(testCase)

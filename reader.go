@@ -926,10 +926,7 @@ func (df *Dicom) crawlMeta() error {
 	if preambleFound {
 		copy(df.Preamble[:], preamble)
 	} else {
-		Debug("file is missing preamble (bytes 0-128")
-		if GetConfig().StrictMode {
-			return CorruptDicomError("crawlMeta: no dicom preamble found")
-		}
+		Debug("file is missing preamble (bytes 0-128)")
 	}
 
 	for {
