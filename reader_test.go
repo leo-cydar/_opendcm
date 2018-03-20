@@ -375,6 +375,158 @@ func TestImplicitVRVRLengthMissing(t *testing.T) {
 
 /*
 ===============================================================================
+    ElementStream: Byte-Level Functions
+===============================================================================
+*/
+
+func TestGetUndefinedLength(t *testing.T) {
+	t.Parallel()
+
+	// zero length buffer should return error
+	es := elementStreamFromBuffer([]byte{})
+	_, err := es.getUndefinedLength(true)
+	assert.IsType(t, &CorruptElementStream{}, err)
+
+	// buffer with length 4 should return error, as
+	// it will be unable to skip "length" section
+	es = elementStreamFromBuffer([]byte{0xFE, 0xFF, 0xDD, 0xE0})
+	_, err = es.getUndefinedLength(true)
+	assert.IsType(t, &CorruptElementStream{}, err)
+
+	// buffer without start item / end sequence tag should
+	// return error, as it indicates corruption.
+	es = elementStreamFromBuffer([]byte{0xFE, 0xFF, 0xDE, 0xE1})
+	_, err = es.getUndefinedLength(true)
+	assert.IsType(t, &CorruptElementStream{}, err)
+
+	// buffer with "Start Item" tag and no following buffer
+	// should return error
+	es = elementStreamFromBuffer([]byte{
+		0xFE, 0xFF, 0x00, 0xE0,
+	})
+	_, err = es.getUndefinedLength(true)
+	assert.IsType(t, &CorruptElementStream{}, err)
+
+	// buffer with "Start Item" element of UL and immediately
+	// following buffer being not-an-element should return error
+	es = elementStreamFromBuffer([]byte{
+		0xFE, 0xFF, 0x00, 0xE0, 0xFF, 0xFF, 0xFF, 0xFF,
+	})
+	_, err = es.getUndefinedLength(true)
+	assert.IsType(t, &CorruptElementStream{}, err)
+
+	// buffer with "Start Item" element of DL and immediately
+	// following buffer being not-an-element should return error
+	es = elementStreamFromBuffer([]byte{
+		0xFE, 0xFF, 0x00, 0xE0, 0x00, 0x01, 0x00, 0x01,
+	})
+	_, err = es.getUndefinedLength(true)
+	assert.IsType(t, &CorruptElementStream{}, err)
+}
+
+func TestGetUint16(t *testing.T) {
+	t.Parallel()
+
+	// < 2 length buffer should return error
+	es := elementStreamFromBuffer(make([]byte, 0))
+	_, err := es.getUint16()
+	assert.IsType(t, &CorruptElementStream{}, err)
+
+	es = elementStreamFromBuffer(make([]byte, 1))
+	_, err = es.getUint16()
+	assert.IsType(t, &CorruptElementStream{}, err)
+
+	// cause problem with the elementStream reader
+	// should return corruption error
+	es = elementStreamFromBuffer(make([]byte, 2))
+	es.reader.Discard(4)
+	_, err = es.getUint16()
+	assert.IsType(t, &CorruptElementStream{}, err)
+
+	// check value returned is as expected for the
+	// various encodings
+	uint16Bytes := []byte{0x00, 0x01}
+	// Little Endian
+	es = elementStreamFromBuffer(uint16Bytes)
+	es.SetTransferSyntax("1.2.840.10008.1.2.1")
+	val, err := es.getUint16()
+	assert.NoError(t, err)
+	assert.Equal(t, uint16(0x100), val)
+	// Big Endian
+	es = elementStreamFromBuffer(uint16Bytes)
+	es.TransferSyntax.SetFromUID("1.2.840.10008.1.2.2")
+	val, err = es.getUint16()
+	assert.NoError(t, err)
+	assert.Equal(t, uint16(0x1), val)
+}
+
+func TestGetUint32(t *testing.T) {
+	t.Parallel()
+
+	// < 4 length buffer should return error
+	es := elementStreamFromBuffer(make([]byte, 0))
+	_, err := es.getUint32()
+	assert.IsType(t, &CorruptElementStream{}, err)
+
+	es = elementStreamFromBuffer(make([]byte, 3))
+	_, err = es.getUint32()
+	assert.IsType(t, &CorruptElementStream{}, err)
+
+	// cause problem with the elementStream reader
+	// should return corruption error
+	es = elementStreamFromBuffer(make([]byte, 4))
+	es.reader.Discard(8)
+	_, err = es.getUint32()
+	assert.IsType(t, &CorruptElementStream{}, err)
+
+	// check value returned is as expected for the
+	// various encodings
+	uint32Bytes := []byte{0x00, 0x01, 0x00, 0x01}
+	// Little Endian
+	es = elementStreamFromBuffer(uint32Bytes)
+	es.SetTransferSyntax("1.2.840.10008.1.2.1")
+	val, err := es.getUint32()
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(0x1000100), val)
+	// Big Endian
+	es = elementStreamFromBuffer(uint32Bytes)
+	es.TransferSyntax.SetFromUID("1.2.840.10008.1.2.2")
+	val, err = es.getUint32()
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(0x10001), val)
+}
+
+func TestTagFromBytes(t *testing.T) {
+	t.Parallel()
+	bufLittleEndian := []byte{0x08, 0x00, 0x05, 0x00}
+	bufBigEndian := []byte{0x00, 0x08, 0x00, 0x05}
+	// little endian
+	tag := tagFromBytes(bufLittleEndian, true)
+	assert.Equal(t, uint32(0x00080005), tag)
+
+	// big endian
+	tag = tagFromBytes(bufBigEndian, false)
+	assert.Equal(t, uint32(0x00080005), tag)
+}
+
+func TestSkipBytes(t *testing.T) {
+	t.Parallel()
+	// try to skip bytes in an empty buffer. should return
+	// an error.
+	es := elementStreamFromBuffer(make([]byte, 0))
+	err := es.skipBytes(4)
+	assert.IsType(t, &CorruptElementStream{}, err)
+
+	// cause problem with the elementStream reader
+	// should return corruption error
+	es = elementStreamFromBuffer(make([]byte, 2))
+	es.reader.Discard(4)
+	err = es.skipBytes(2)
+	assert.IsType(t, &CorruptElementStream{}, err)
+}
+
+/*
+===============================================================================
     Element Parsing: VRs
 ===============================================================================
 */

@@ -716,8 +716,6 @@ func (es *ElementStream) getUndefinedLength(parseElements bool) ([]Item, error) 
 					switch err.(type) {
 					case *CorruptElement:
 						return nil, CorruptElementStreamError("getUndefinedLength(): %v", err)
-					case *UnsupportedDicom:
-						return nil, UnsupportedDicomError("getUndefinedLength(): %v", err)
 					default:
 						panic(err)
 					}
