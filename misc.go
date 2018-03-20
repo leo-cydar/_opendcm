@@ -407,14 +407,16 @@ func ConcurrentlyWalkDir(dirPath string, onFile func(file string)) error {
 	}
 
 	// now goroutine each file
+	wg.Add(len(files))
+	m := sync.Mutex{}
 	for _, filePath := range files {
-		wg.Add(1)
 		guard <- true // would block if guard channel is already filled
 		go func(path string) {
+			defer wg.Done()
+			m.Lock()
 			onFile(path)
+			m.Unlock()
 			<-guard
-
-			wg.Done()
 		}(filePath)
 	}
 	wg.Wait()
