@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -400,7 +401,14 @@ func (e Element) Describe(indentLevel int) []string {
 		}
 	} else if e.ValueLength > 0 {
 		if e.ValueLength <= 256 {
-			description = append(description, fmt.Sprintf("%s[%s] %s %s: %v", indentStr, e.VR, e.Tag, e.Name, e.Value()))
+			// if the value is of slice type, but only length 1, we should just list the first item.
+			// this changes output from [1] => 1, or [ValueHere] => ValueHere, but [1,2,3] will still be [1,2,3]
+			reflectVal := reflect.ValueOf(e.Value())
+			if reflectVal.Kind() == reflect.Slice && reflectVal.Len() == 1 {
+				reflectVal = reflectVal.Index(0)
+			}
+			description = append(description, fmt.Sprintf("%s[%s] %s %s: %v", indentStr, e.VR, e.Tag, e.Name, reflectVal))
+
 		} else {
 			description = append(description, fmt.Sprintf("%s[%s] %s %s: (%d bytes)", indentStr, e.VR, e.Tag, e.Name, e.ValueLength))
 		}
