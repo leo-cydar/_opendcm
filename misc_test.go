@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestIntFromEnv(t *testing.T) {
@@ -20,43 +22,30 @@ func TestIntFromEnv(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		err := os.Setenv("OPENDCM_TEST", testCase.input)
-		if err != nil {
-			t.Fatalf("error: %v", err)
-		}
+		assert.NoError(t, err, testCase)
+
 		val, found := intFromEnv("OPENDCM_TEST")
-		if !found {
-			t.Fatal("OPENDCM_TEST was not found in environment")
-		}
-		if val != testCase.output {
-			t.Fatalf("got %d (!= %d)", val, testCase.output)
-		}
+		assert.True(t, found, testCase)
+		assert.Equal(t, testCase.output, val)
 	}
 	// unset environment variable then try to retrieve
 	err := os.Unsetenv("OPENDCM_TEST")
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	assert.NoError(t, err)
 	_, found := intFromEnv("OPENDCM_TEST")
-	if found {
-		t.Fatalf("OPENDCM_TEST was found after unsetting")
-	}
+	assert.False(t, found)
 }
 
 func TestIntFromEnvDefault(t *testing.T) {
 	// unset environment variable then try to retrieve
 	err := os.Unsetenv("OPENDCM_TEST")
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	assert.NoError(t, err)
+
 	val := intFromEnvDefault("OPENDCM_TEST", 9000)
-	if val != 9000 {
-		t.Fatalf("got %d (!= 9000)", val)
-	}
-	os.Setenv("OPENDCM_TEST", "42")
+	assert.Equal(t, 9000, val)
+	err = os.Setenv("OPENDCM_TEST", "42")
+	assert.NoError(t, err)
 	val = intFromEnvDefault("OPENDCM_TEST", 9000)
-	if val != 42 {
-		t.Fatalf("got %d (!= 42)", val)
-	}
+	assert.Equal(t, 42, val)
 }
 
 func TestStrFromEnv(t *testing.T) {
@@ -70,43 +59,27 @@ func TestStrFromEnv(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		err := os.Setenv("OPENDCM_TEST", testCase.input)
-		if err != nil {
-			t.Fatalf("error: %v", err)
-		}
+		assert.NoError(t, err, testCase)
 		val, found := strFromEnv("OPENDCM_TEST")
-		if !found {
-			t.Fatal("OPENDCM_TEST was not found in environment")
-		}
-		if val != testCase.output {
-			t.Fatalf("got %s (!= %s)", val, testCase.output)
-		}
+		assert.True(t, found, testCase)
+		assert.Equal(t, testCase.output, val, testCase)
 	}
 	// unset environment variable then try to retrieve
 	err := os.Unsetenv("OPENDCM_TEST")
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	assert.NoError(t, err)
 	_, found := strFromEnv("OPENDCM_TEST")
-	if found {
-		t.Fatalf("OPENDCM_TEST was found after unsetting")
-	}
+	assert.False(t, found)
 }
 
 func TestStrFromEnvDefault(t *testing.T) {
 	// unset environment variable then try to retrieve
 	err := os.Unsetenv("OPENDCM_TEST")
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	assert.NoError(t, err)
 	val := strFromEnvDefault("OPENDCM_TEST", "ascii")
-	if val != "ascii" {
-		t.Fatalf(`got "%s" (!= "ascii")`, val)
-	}
+	assert.Equal(t, "ascii", val)
 	os.Setenv("OPENDCM_TEST", "42")
 	val = strFromEnvDefault("OPENDCM_TEST", "ascii")
-	if val != "42" {
-		t.Fatalf(`got "%s" (!= "42")`, val)
-	}
+	assert.Equal(t, "42", val)
 }
 
 func TestBoolFromEnv(t *testing.T) {
@@ -121,132 +94,85 @@ func TestBoolFromEnv(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		err := os.Setenv("OPENDCM_TEST", testCase.input)
-		if err != nil {
-			t.Fatalf("error: %v", err)
-		}
+		assert.NoError(t, err, testCase)
 		val, found := boolFromEnv("OPENDCM_TEST")
-		if !found {
-			t.Fatal("OPENDCM_TEST was not found in environment")
-		}
-		if val != testCase.output {
-			t.Fatalf("got %t (!= %t)", val, testCase.output)
-		}
+		assert.True(t, found, testCase)
+		assert.Equal(t, testCase.output, val, testCase)
 	}
 	// unset environment variable then try to retrieve
 	err := os.Unsetenv("OPENDCM_TEST")
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	assert.NoError(t, err)
 	_, found := boolFromEnv("OPENDCM_TEST")
-	if found {
-		t.Fatalf("OPENDCM_TEST was found after unsetting")
-	}
+	assert.False(t, found)
 }
 
 func TestBoolFromEnvDefault(t *testing.T) {
 	// unset environment variable then try to retrieve
 	err := os.Unsetenv("OPENDCM_TEST")
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	assert.NoError(t, err)
 	val := boolFromEnvDefault("OPENDCM_TEST", true)
-	if val != true {
-		t.Fatalf(`got %t (!= true)`, val)
-	}
+	assert.True(t, val)
 	os.Setenv("OPENDCM_TEST", "false")
 	val = boolFromEnvDefault("OPENDCM_TEST", true)
-	if val != false {
-		t.Fatalf(`got %t (!= false)`, val)
-	}
+	assert.False(t, val)
 }
 
 func TestGetConfig(t *testing.T) {
 	os.Setenv("OPENDCM_OPENFILELIMIT", "100")
 	config._set = false
 	cfg := GetConfig()
-	if cfg.OpenFileLimit != 100 {
-		t.Fatalf("OpenFileLimit = %d (!= 100)", cfg.OpenFileLimit)
-	}
+	assert.Equal(t, 100, cfg.OpenFileLimit)
 }
 func TestOverrideConfig(t *testing.T) {
 	newcfg := Config{OpenFileLimit: 256}
 	OverrideConfig(newcfg)
 	cfg := GetConfig()
-	if cfg.OpenFileLimit != 256 {
-		t.Fatalf("OpenFileLimit = %d (!= 256)", cfg.OpenFileLimit)
-	}
+	assert.Equal(t, 256, cfg.OpenFileLimit)
 }
 
 func TestConcurrentlyWalkDir(t *testing.T) {
 	files := make([]string, 0)
 	// make temporary directory for tests
 	tmpdir, err := ioutil.TempDir("", "opendcm")
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	assert.NoError(t, err)
 	// be sure to remove up dir afterwards
 	defer os.RemoveAll(tmpdir)
 	for i := 0; i < 10; i++ {
 		_, err = ioutil.TempFile(tmpdir, strconv.Itoa(i))
-		if err != nil {
-			t.Fatalf("error: %v", err)
-		}
+		assert.NoError(t, err)
 	}
 	ConcurrentlyWalkDir(tmpdir, func(path string) {
 		files = append(files, path)
 	})
-	if len(files) == 0 {
-		t.Fatalf("did not report any files")
-	}
+	assert.NotEqual(t, 0, files)
 }
 
 func TestGetImplementationUID(t *testing.T) {
 	t.Parallel()
 	uid := GetImplementationUID(true)
 	expected := fmt.Sprintf("%s%s.1", OpenDCMRootUID, OpenDCMVersion)
-	if uid != expected {
-		t.Fatalf(`got "%s" (!= "%s")`, uid, expected)
-	}
+	assert.Equal(t, expected, uid)
 	uid = GetImplementationUID(false)
 	expected = fmt.Sprintf("%s%s.0", OpenDCMRootUID, OpenDCMVersion)
-	if uid != expected {
-		t.Fatalf(`got "%s" (!= "%s")`, uid, expected)
-	}
+	assert.Equal(t, expected, uid)
 }
 
 func TestNewRandInstanceUID(t *testing.T) {
 	t.Parallel()
 	uid, err := NewRandInstanceUID()
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	assert.NoError(t, err)
 	index := strings.Index(uid, OpenDCMRootUID)
-	if index != 0 {
-		t.Fatalf("uid did not start with OpenDCMRootUID")
-	}
-
+	assert.Equal(t, 0, index)
 }
 
 func TestColourForLevel(t *testing.T) {
 	t.Parallel()
-	if colour := colourForLevel("D"); colour != ansiMagenta {
-		t.Fatal("got wrong colour for logging level 'D'")
-	}
-	if colour := colourForLevel("I"); colour != ansiGreen {
-		t.Fatal("got wrong colour for logging level 'I'")
-	}
-	if colour := colourForLevel("W"); colour != ansiYellow {
-		t.Fatal("got wrong colour for logging level 'W'")
-	}
-	if colour := colourForLevel("E"); colour != ansiRed {
-		t.Fatal("got wrong colour for logging level 'E'")
-	}
-	if colour := colourForLevel("F"); colour != ansiRed {
-		t.Fatal("got wrong colour for logging level 'F'")
-	}
-	if colour := colourForLevel("T"); colour != 0 {
-		t.Fatal("got wrong colour for unknown logging level 'T'")
-	}
+	assert.Equal(t, ansiMagenta, colourForLevel("D"))
+	assert.Equal(t, ansiGreen, colourForLevel("I"))
+	assert.Equal(t, ansiYellow, colourForLevel("W"))
+	assert.Equal(t, ansiRed, colourForLevel("E"))
+	assert.Equal(t, ansiRed, colourForLevel("F"))
+	assert.Equal(t, 0, colourForLevel("T"))
 }
 
 func getLogEntries(buf *bytes.Buffer) []string {
@@ -268,9 +194,7 @@ func TestDebugLoggerEnabled(t *testing.T) {
 	Debugf("%s", "message")
 	Debug("message")
 	logEntries := getLogEntries(buf)
-	if len(logEntries) != 2 {
-		t.Fatalf("got %d log entries (!= 2)", len(logEntries))
-	}
+	assert.Len(t, logEntries, 2)
 }
 
 func TestDebugLoggerDisabled(t *testing.T) {
@@ -280,9 +204,7 @@ func TestDebugLoggerDisabled(t *testing.T) {
 	Debugf("%s", "message")
 	Debug("message")
 	logEntries := getLogEntries(buf)
-	if len(logEntries) != 0 {
-		t.Fatalf("got %d log entries (!= 0)", len(logEntries))
-	}
+	assert.Len(t, logEntries, 0)
 }
 
 func TestInfoLoggerEnabled(t *testing.T) {
@@ -292,9 +214,7 @@ func TestInfoLoggerEnabled(t *testing.T) {
 	Infof("%s", "message")
 	Info("message")
 	logEntries := getLogEntries(buf)
-	if len(logEntries) != 2 {
-		t.Fatalf("got %d log entries (!= 2)", len(logEntries))
-	}
+	assert.Len(t, logEntries, 2)
 }
 
 func TestInfoLoggerDisabled(t *testing.T) {
@@ -304,9 +224,7 @@ func TestInfoLoggerDisabled(t *testing.T) {
 	Infof("%s", "message")
 	Info("message")
 	logEntries := getLogEntries(buf)
-	if len(logEntries) != 0 {
-		t.Fatalf("got %d log entries (!= 0)", len(logEntries))
-	}
+	assert.Len(t, logEntries, 0)
 }
 
 func TestWarnLoggerEnabled(t *testing.T) {
@@ -316,9 +234,7 @@ func TestWarnLoggerEnabled(t *testing.T) {
 	Warnf("%s", "message")
 	Warn("message")
 	logEntries := getLogEntries(buf)
-	if len(logEntries) != 2 {
-		t.Fatalf("got %d log entries (!= 2)", len(logEntries))
-	}
+	assert.Len(t, logEntries, 2)
 }
 
 func TestWarnLoggerDisabled(t *testing.T) {
@@ -328,9 +244,7 @@ func TestWarnLoggerDisabled(t *testing.T) {
 	Warnf("%s", "message")
 	Warn("message")
 	logEntries := getLogEntries(buf)
-	if len(logEntries) != 0 {
-		t.Fatalf("got %d log entries (!= 0)", len(logEntries))
-	}
+	assert.Len(t, logEntries, 0)
 }
 func TestErrorLoggerEnabled(t *testing.T) {
 	SetLoggingLevel("error")
@@ -339,9 +253,7 @@ func TestErrorLoggerEnabled(t *testing.T) {
 	Errorf("%s", "message")
 	Error("message")
 	logEntries := getLogEntries(buf)
-	if len(logEntries) != 2 {
-		t.Fatalf("got %d log entries (!= 2)", len(logEntries))
-	}
+	assert.Len(t, logEntries, 2)
 }
 
 func TestErrorLoggerDisabled(t *testing.T) {
@@ -351,9 +263,7 @@ func TestErrorLoggerDisabled(t *testing.T) {
 	Errorf("%s", "message")
 	Error("message")
 	logEntries := getLogEntries(buf)
-	if len(logEntries) != 0 {
-		t.Fatalf("got %d log entries (!= 0)", len(logEntries))
-	}
+	assert.Len(t, logEntries, 0)
 }
 
 func TestFatalLoggerEnabled(t *testing.T) {
@@ -365,9 +275,7 @@ func TestFatalLoggerEnabled(t *testing.T) {
 	Fatal("message")
 	FatalfDepth(1, "%s", "message with depth")
 	logEntries := getLogEntries(buf)
-	if len(logEntries) != 3 {
-		t.Fatalf("got %d log entries (!= 3)", len(logEntries))
-	}
+	assert.Len(t, logEntries, 3)
 }
 
 func TestFatalLoggerDisabled(t *testing.T) {
@@ -379,7 +287,5 @@ func TestFatalLoggerDisabled(t *testing.T) {
 	Fatal("message")
 	FatalfDepth(1, "%s", "message with depth")
 	logEntries := getLogEntries(buf)
-	if len(logEntries) != 0 {
-		t.Fatalf("got %d log entries (!= 0)", len(logEntries))
-	}
+	assert.Len(t, logEntries, 0)
 }

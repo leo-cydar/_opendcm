@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/b71729/opendcm/dictionary"
 )
@@ -129,28 +130,20 @@ func TestParseValidFiles(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		dcm, err := ParseDicom(testCase.path)
-		if err != nil {
-			t.Fatalf("%s: error: %v", testCase.path, err)
-		}
+		assert.NoError(t, err, testCase.path)
+
 		// should have found all elements
-		if l := len(dcm.Elements); l != testCase.numElements {
-			t.Fatalf("%s: number of elements = %d (!= %d)", testCase.path, l, testCase.numElements)
-		}
+		assert.Len(t, dcm.Elements, testCase.numElements, testCase.path)
+
 		stat, err := os.Stat(testCase.path)
-		if err != nil {
-			t.Fatalf("%s: error: %v", testCase.path, err)
-		}
+		assert.NoError(t, err, testCase.path)
+
 		// should be at end of file
-		if pos := dcm.elementStream.GetPosition(); pos != stat.Size() {
-			t.Fatalf("%s: reader position = %d (!= %d)", testCase.path, pos, stat.Size())
-		}
+		assert.Equal(t, stat.Size(), dcm.elementStream.GetPosition(), testCase.path)
 
 		// check all elements values match correct type for their VR:
 		for _, e := range dcm.Elements {
-			val := e.Value()
-			if !valueTypeMatchesVR(e.VR, val) {
-				t.Fatalf(`%s: type "%s" for element %s is incorrect (VR="%s")`, testCase.path, reflect.TypeOf(val), e.Tag, e.VR)
-			}
+			assert.True(t, valueTypeMatchesVR(e.VR, e.Value()))
 		}
 	}
 }
@@ -173,34 +166,26 @@ func TestParseValidBuffers(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		f, err := os.Open(testCase.path)
-		if err != nil {
-			t.Fatalf("%s: error: %v", testCase.path, err)
-		}
+		assert.NoError(t, err, testCase.path)
+
 		stat, err := os.Stat(testCase.path)
-		if err != nil {
-			t.Fatalf("%s: error: %v", testCase.path, err)
-		}
-		buf := make([]byte, stat.Size())
-		io.ReadFull(f, buf)
+		assert.NoError(t, err, testCase.path)
+
+		buf, err := ioutil.ReadAll(f)
+		assert.NoError(t, err, testCase.path)
+
 		dcm, err := ParseFromBytes(buf)
-		if err != nil {
-			t.Fatalf("%s: error: %v", testCase.path, err)
-		}
+		assert.NoError(t, err, testCase.path)
+
 		// should have found all elements
-		if l := len(dcm.Elements); l != testCase.numElements {
-			t.Fatalf("%s: number of elements = %d (!= %d)", testCase.path, l, testCase.numElements)
-		}
-		// should be at end of buffer
-		if pos := dcm.elementStream.GetPosition(); pos != stat.Size() {
-			t.Fatalf("%s: reader position = %d (!= %d)", testCase.path, pos, stat.Size())
-		}
+		assert.Len(t, dcm.Elements, testCase.numElements, testCase.path)
+
+		// should be at end of file
+		assert.Equal(t, stat.Size(), dcm.elementStream.GetPosition(), testCase.path)
 
 		// check all elements values match correct type for their VR:
 		for _, e := range dcm.Elements {
-			val := e.Value()
-			if !valueTypeMatchesVR(e.VR, val) {
-				t.Fatalf(`%s: type "%s" for element %s is incorrect (VR="%s")`, testCase.path, reflect.TypeOf(val), e.Tag, e.VR)
-			}
+			assert.True(t, valueTypeMatchesVR(e.VR, e.Value()))
 		}
 	}
 }
@@ -210,25 +195,17 @@ func TestIssue6(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("testdata", "TCIA", "1.3.12.2.1107.5.1.4.1001.30000013072513125762500009613.dcm")
 	dcm, err := ParseDicom(path)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	assert.NoError(t, err, path)
 
 	// 0028,0107 (LargestImagePixelValue) has VR of US, with value 2766. But source DICOM specifies it as UN.
 	// Check that the correct value has been parsed to prevent regression
 	e, found := dcm.GetElement(0x00280107)
-	if !found {
-		t.Fatalf("could not find (0028,0107) in file")
-	}
+	assert.True(t, found)
 
 	val := e.Value()
-	if !valueTypeMatchesVR(e.VR, val) {
-		t.Fatalf(`type "%s" for element %s is incorrect (VR="%s")`, reflect.TypeOf(val), e.Tag, e.VR)
-	}
-
-	if val.(uint16) != 2766 {
-		t.Fatalf("(0028,0107) returned %d (!= 2766)", val.(uint16))
-	}
+	assert.True(t, valueTypeMatchesVR(e.VR, val))
+	assert.IsType(t, uint16(2766), val)
+	assert.Equal(t, uint16(2766), val)
 }
 
 // TestParseFileWIthZeroElementLength tests that the parser can accept a file containing an embedded
@@ -236,90 +213,61 @@ func TestIssue6(t *testing.T) {
 func TestParseFileWithZeroElementLength(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("testdata", "synthetic", "ZeroElementLength.dcm")
-	dcm, err := ParseDicom(path)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-	e, found := dcm.GetElement(0x00080005)
-	if !found {
-		t.Fatalf("could not find (0008,0005) in file")
-	}
 
-	if e.ValueLength != 0 {
-		t.Fatalf("(0008,0005) has value length of %d (!= 0)", e.ValueLength)
-	}
+	dcm, err := ParseDicom(path)
+	assert.NoError(t, err, path)
+
+	e, found := dcm.GetElement(0x00080005)
+	assert.True(t, found)
+	assert.Equal(t, uint32(0), e.ValueLength)
 }
 
 func TestParseFileWithMissingMetaLength(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("testdata", "synthetic", "MissingMetaLength.dcm")
-	dcm, err := ParseDicom(path)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-	if dcm.TotalMetaBytes != 340 {
-		t.Fatalf("meta length = %d (!= 340)", dcm.TotalMetaBytes)
-	}
-	e, found := dcm.GetElement(0x7FE00010)
-	if !found {
-		t.Fatalf("could not find (7FE0,0010) in file")
-	}
 
-	if e.ValueLength != 4 {
-		t.Fatalf("(7FE0,0010) has value length of %d (!= 4)", e.ValueLength)
-	}
+	dcm, err := ParseDicom(path)
+	assert.NoError(t, err, path)
+
+	assert.Equal(t, int64(340), dcm.TotalMetaBytes)
+
+	e, found := dcm.GetElement(0x7FE00010)
+	assert.True(t, found)
+	assert.Equal(t, uint32(4), e.ValueLength)
 }
 
 func TestParseFileWithMissingTransferSyntax(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("testdata", "synthetic", "MissingTransferSyntax.dcm")
+
 	dcm, err := ParseDicom(path)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-	if dcm.TotalMetaBytes != 324 {
-		t.Fatalf("meta length = %d (!= 324)", dcm.TotalMetaBytes)
-	}
+	assert.NoError(t, err, path)
+	assert.Equal(t, int64(324), dcm.TotalMetaBytes)
 	// transfer syntax should be the default (ImplicitVR, LittleEndian)
-	if dcm.elementStream.TransferSyntax.UIDEntry.UID != "1.2.840.10008.1.2" {
-		t.Fatalf(`missing transfer syntax should have defaulted to "1.2.840.10008.1.2" (got "%s")`, dcm.elementStream.TransferSyntax.UIDEntry.UID)
-	}
+	assert.Equal(t, "1.2.840.10008.1.2", dcm.elementStream.TransferSyntax.UIDEntry.UID)
+
 	e, found := dcm.GetElement(0x7FE00010)
-	if !found {
-		t.Fatalf("could not find (7FE0,0010) in file")
-	}
-	if e.ValueLength != 4 {
-		t.Fatalf("(7FE0,0010) has value length of %d (!= 4)", e.ValueLength)
-	}
-	if len(dcm.Elements) != 8 {
-		t.Fatalf("found %d elements (!= 8)", len(dcm.Elements))
-	}
+	assert.True(t, found)
+	assert.Equal(t, uint32(4), e.ValueLength)
+
+	assert.Len(t, dcm.Elements, 8)
 }
 
 func TestParseFileWithMissingPreambleMagic(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("testdata", "synthetic", "MissingPreambleMagic.dcm")
+
 	dcm, err := ParseDicom(path)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-	if dcm.TotalMetaBytes != 192 {
-		t.Fatalf("meta length = %d (!= 192)", dcm.TotalMetaBytes)
-	}
+	assert.NoError(t, err, path)
+	assert.Equal(t, int64(192), dcm.TotalMetaBytes)
 	// transfer syntax should be the default (ImplicitVR, LittleEndian)
-	if dcm.elementStream.TransferSyntax.UIDEntry.UID != "1.2.840.10008.1.2" {
-		t.Fatalf(`missing transfer syntax should have defaulted to "1.2.840.10008.1.2" (got "%s")`, dcm.elementStream.TransferSyntax.UIDEntry.UID)
-	}
+	assert.Equal(t, "1.2.840.10008.1.2", dcm.elementStream.TransferSyntax.UIDEntry.UID)
+
 	e, found := dcm.GetElement(0x7FE00010)
-	if !found {
-		t.Fatalf("could not find (7FE0,0010) in file")
-	}
-	if e.ValueLength != 4 {
-		t.Fatalf("(7FE0,0010) has value length of %d (!= 4)", e.ValueLength)
-	}
-	if len(dcm.Elements) != 8 {
-		t.Fatalf("found %d elements (!= 8)", len(dcm.Elements))
-	}
+	assert.True(t, found)
+	assert.Equal(t, uint32(4), e.ValueLength)
+
+	assert.Len(t, dcm.Elements, 8)
 }
 
 /*
@@ -337,11 +285,8 @@ func TestParseUnsupportedDicoms(t *testing.T) {
 	for _, file := range corruptFiles {
 		path := filepath.Join("testdata", "synthetic", file)
 		_, err := ParseDicom(path)
-		switch err.(type) {
-		case *UnsupportedDicom:
-		default:
-			t.Fatalf(`parsing dicom "%s" with unrecognised Transfer Syntax should have raised an UnsupportedDicom error (got %v)`, path, err)
-		}
+		assert.Error(t, err)
+		assert.IsType(t, &UnsupportedDicom{}, err)
 	}
 }
 
@@ -356,22 +301,13 @@ func TestParseUnsupportedBuffers(t *testing.T) {
 		path := filepath.Join("testdata", "synthetic", file)
 
 		f, err := os.Open(path)
-		if err != nil {
-			t.Fatalf("%s: error: %v", path, err)
-		}
-		stat, err := os.Stat(path)
-		if err != nil {
-			t.Fatalf("%s: error: %v", path, err)
-		}
-		buf := make([]byte, stat.Size())
-		io.ReadFull(f, buf)
-		_, err = ParseFromBytes(buf)
+		assert.NoError(t, err, path)
+		buf, err := ioutil.ReadAll(f)
+		assert.NoError(t, err, path)
 
-		switch err.(type) {
-		case *UnsupportedDicom:
-		default:
-			t.Fatalf(`parsing dicom "%s" with unrecognised Transfer Syntax should have raised an UnsupportedDicom error (got %v)`, path, err)
-		}
+		_, err = ParseFromBytes(buf)
+		assert.Error(t, err, path)
+		assert.IsType(t, &UnsupportedDicom{}, err, path)
 	}
 }
 
@@ -390,11 +326,8 @@ func TestStrictModeEnabled(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		_, err := ParseDicom(testCase)
-		switch err.(type) {
-		case *CorruptDicom:
-		default:
-			t.Fatalf(`with "StrictMode" disabled, parsing "%s" should have raised a CorruptDicomError (got %v)`, testCase, err)
-		}
+		assert.Error(t, err)
+		assert.IsType(t, &CorruptDicom{}, err, testCase)
 	}
 }
 func TestStrictModeDisabled(t *testing.T) {
@@ -407,9 +340,7 @@ func TestStrictModeDisabled(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		_, err := ParseDicom(testCase)
-		if err != nil {
-			t.Fatalf(`with "StrictMode" disabled, parsing "%s" should not have raised an error (got %v)`, testCase, err)
-		}
+		assert.NoError(t, err, testCase)
 	}
 }
 
@@ -425,13 +356,9 @@ func TestGetElementWithInsufficientBytes(t *testing.T) {
 	}
 	for _, buf := range testCases {
 		_, err := elementFromBuffer(buf)
-		if errValue, ok := err.(*CorruptElement); ok {
-			if !strings.Contains(errValue.Error(), "would exceed") {
-				t.Fatalf(`should have contained detail containing "would exceed" (got %s)`, errValue.Error())
-			}
-		} else {
-			t.Fatalf(`should have raised a CorruptElementError (got %v)`, err)
-		}
+		assert.Error(t, err, string(buf))
+		assert.IsType(t, &CorruptElement{}, err, string(buf))
+		assert.Contains(t, err.Error(), "would exceed", string(buf))
 	}
 }
 
@@ -441,13 +368,9 @@ func TestImplicitVRVRLengthMissing(t *testing.T) {
 	es := elementStreamFromBuffer(buf)
 	es.SetTransferSyntax("1.2.840.10008.1.2") // ImplicitVR
 	_, err := es.GetElement()
-	if errValue, ok := err.(*CorruptElement); ok {
-		if !strings.Contains(errValue.Error(), "would exceed") {
-			t.Fatalf(`should have contained detail containing "would exceed" (got %s)`, errValue.Error())
-		}
-	} else {
-		t.Fatalf(`should have raised a CorruptElementError (got %v)`, err)
-	}
+	assert.Error(t, err, buf)
+	assert.IsType(t, &CorruptElement{}, err, buf)
+	assert.Contains(t, err.Error(), "would exceed", buf)
 }
 
 /*
@@ -460,25 +383,17 @@ func TestDecodeBytesEmptyCharset(t *testing.T) {
 	t.Parallel()
 	// should return string([]byte), so utf-8
 	val, err := decodeBytes([]byte("parser"), nil)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-	if val != "parser" {
-		t.Fatalf(`got "%s" (!= "parser")`, val)
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, "parser", val)
 }
 
 func TestIsCharacterStringVR(t *testing.T) {
 	t.Parallel()
 	for _, v := range []string{"AE", "AS", "CS", "DA", "DS", "DT", "IS", "LO", "LT", "PN", "SH", "ST", "TM", "UI", "UT"} {
-		if !IsCharacterStringVR(v) {
-			t.Fatalf(`VR "%s" should be character string VR`, v)
-		}
+		assert.True(t, IsCharacterStringVR(v), v)
 	}
 	for _, v := range []string{"OB", "FL"} {
-		if IsCharacterStringVR(v) {
-			t.Fatalf(`VR "%s" should not be character string VR`, v)
-		}
+		assert.False(t, IsCharacterStringVR(v), v)
 	}
 }
 
@@ -503,9 +418,7 @@ func TestSplitBinaryVM(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		val := splitBinaryVM(testCase.input, testCase.nsplit)
-		if len(val) != len(testCase.expected) {
-			t.Fatalf("got %d splits (!= %d)", len(val), len(testCase.expected))
-		}
+		assert.Len(t, val, len(testCase.expected), testCase)
 	}
 }
 
@@ -530,13 +443,9 @@ func TestSplitCharacterStringVM(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		val := splitCharacterStringVM(testCase.input)
-		if len(val) != len(testCase.expected) {
-			t.Fatalf("got %d splits (!= %d)", len(val), len(testCase.expected))
-		}
+		assert.Len(t, val, len(testCase.expected), testCase)
 		for i, split := range val {
-			if bytes.Compare(split, testCase.expected[i]) != 0 {
-				t.Fatalf(`got "%v" (!= "%v")`, split, testCase.expected[i])
-			}
+			assert.Zero(t, bytes.Compare(split, testCase.expected[i]))
 		}
 	}
 }
@@ -549,22 +458,20 @@ func TestTagSorting(t *testing.T) {
 		{DictEntry: &dictionary.DictEntry{Tag: 0x0001FFFF}},
 	}
 	sort.Sort(ByTag(elements))
-	if elements[0].Tag != 0x0001FFFF {
-		t.Fatalf(`sort failed`)
-	}
-	if elements[1].Tag != 0x00100020 {
-		t.Fatalf(`sort failed`)
-	}
-	if elements[2].Tag != 0x0020008F {
-		t.Fatalf(`sort failed`)
-	}
+	assert.Equal(t, 0x0001FFFF, int(elements[0].Tag))
+	assert.Equal(t, 0x00100020, int(elements[1].Tag))
+	assert.Equal(t, 0x0020008F, int(elements[2].Tag))
 }
 
 func TestDescribe(t *testing.T) {
 	t.Parallel()
 	// describe a SQ element, which contains nested elements for optimal coverage
-	lookup, _ := LookupTag(0x00081130) // SQ
-	lookupSub, _ := LookupTag(0x001811A2)
+	lookup, found := LookupTag(0x00081130) // SQ
+	assert.True(t, found)
+
+	lookupSub, found := LookupTag(0x001811A2)
+	assert.True(t, found)
+
 	element := Element{DictEntry: lookup}
 	element.Items = []Item{
 		{Elements: map[uint32]Element{
@@ -572,36 +479,24 @@ func TestDescribe(t *testing.T) {
 		}},
 	}
 	description := element.Describe(0)
-	if len(description) != 2 {
-		t.Fatalf("got %d (!= 2) for SQ", len(description))
-	}
+	assert.Len(t, description, 2)
 	// now describe empty SQ
 	element = Element{DictEntry: lookup}
 	description = element.Describe(0)
-	if len(description) != 1 {
-		t.Fatalf("got %d (!= 1) for SQ", len(description))
-	}
+	assert.Len(t, description, 1)
 	// now describe Element with undefined length
 	element, err := elementFromBuffer(validUNElementULBytes)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	assert.NoError(t, err)
 	description = element.Describe(0)
-	if !strings.Contains(description[1], "2 bytes") {
-		t.Fatal(`"2 bytes" not found in description`)
-	}
+	assert.Contains(t, description[1], "2 bytes")
 
 	// now describe Element with > 256 bytes length
 	// should not actually attempt to display contents
 	element, err = elementFromBuffer(validCSElementBytes)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	assert.NoError(t, err)
 	element.ValueLength = 1024
 	description = element.Describe(0)
-	if !strings.Contains(description[0], "1024 bytes") {
-		t.Fatal(`"1024 bytes" not found in description`)
-	}
+	assert.Contains(t, description[0], "1024 bytes")
 }
 
 func TestSupportsMultiVM(t *testing.T) {
@@ -619,8 +514,10 @@ func TestSupportsMultiVM(t *testing.T) {
 	for _, testCase := range testCases {
 		element := Element{DictEntry: &dictionary.DictEntry{VM: testCase.VM}}
 		supports := element.SupportsMultiVM()
-		if testCase.supports != supports {
-			t.Fail()
+		if testCase.supports {
+			assert.True(t, supports, testCase)
+		} else {
+			assert.False(t, supports, testCase)
 		}
 	}
 }
@@ -629,65 +526,41 @@ func TestSupportsMultiVM(t *testing.T) {
 func TestParseCS(t *testing.T) {
 	t.Parallel()
 	element, err := elementFromBuffer(validCSElementBytes)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	assert.NoError(t, err)
 	// tag should match
-	if tag := element.Tag; tag != 0x00280004 {
-		t.Fatalf("tag = %08X (!= 0x00280004)", uint32(tag))
-	}
+	assert.Equal(t, 0x00280004, int(element.Tag))
 	// VR should match
-	if vr := element.VR; vr != "CS" {
-		t.Fatalf(`VR = "%s" (!= "CS")`, vr)
-	}
-	// Contents should match
-	if val, ok := element.Value().(string); ok {
-		if val != "MONOCHROME2" {
-			t.Fatalf(`"%s" != "MONOCHROME2"`, val)
-		}
-	} else {
-		t.Fatal("wrong type for element 0028,0004 (expected string)")
-	}
+	assert.Equal(t, "CS", element.VR)
+	val := element.Value()
+	// contents should match
+	assert.IsType(t, "", val)
+	assert.Equal(t, val, "MONOCHROME2")
 }
 
 // TestParseSQ attempts to parse SQ
 func TestParseSQ(t *testing.T) {
 	t.Parallel()
 	element, err := elementFromBuffer(validSequenceElementBytes)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	assert.NoError(t, err)
+
 	// tag should match
-	if tag := element.Tag; tag != 0x00321064 {
-		t.Fatalf("tag = %08X (!= 0x00321064)", uint32(tag))
-	}
+	assert.Equal(t, 0x00321064, int(element.Tag))
+
 	// items should match
-	if l := len(element.Items); l != 1 {
-		t.Fatalf("len(items) = %d (!= 1)", l)
-	}
+	assert.Len(t, element.Items, 1)
 	item := element.Items[0]
 	// should have found four embedded elements
-	if l := len(item.Elements); l != 4 {
-		t.Fatalf("len(item.Elements) = %d (!= 4)", l)
-	}
-	if l := len(item.Unparsed); l != 0 {
-		t.Fatalf("len(item.Unparsed) = %d (!= 0)", l)
-	}
+	assert.Len(t, item.Elements, 4)
+	assert.Len(t, item.Unparsed, 0)
+
 	// embedded element should match
 	subelement, found := item.GetElement(0x00080102)
-	if !found {
-		t.Fatal("could not find subelement 0008,0102 inside sequence")
-	}
-	if subelement.VR != "SH" {
-		t.Fatalf("subelement VR = %s (!= SH)", subelement.VR)
-	}
-	if val, ok := subelement.Value().(string); ok {
-		if val != "SECTRA RIS" {
-			t.Fatalf(`"%s" != "SECTRA RIS"`, val)
-		}
-	} else {
-		t.Fatal("wrong type for subelement 0008,0102 (expected string)")
-	}
+	assert.True(t, found)
+
+	assert.Equal(t, "SH", subelement.VR)
+	val := subelement.Value()
+	assert.IsType(t, "", val)
+	assert.Equal(t, val, "SECTRA RIS")
 }
 
 // TestGuessTransferSyntaxFromBytes tests whether we are able to guess the correct transfer syntax
@@ -717,12 +590,8 @@ func TestGuessTransferSyntaxFromBytes(t *testing.T) {
 	}
 	for i, testCase := range testCases {
 		encoding, success := guessTransferSyntaxFromBytes(testCase.signature)
-		if !success {
-			t.Fatalf("no success guessing transfer syntax for signature #%d", i+1)
-		}
-		if encoding != testCase.expected {
-			t.Fatalf("guessed wrong encoding for signature #%d", i+1)
-		}
+		assert.True(t, success, i)
+		assert.Equal(t, testCase.expected, encoding, i)
 	}
 }
 
@@ -731,9 +600,7 @@ func TestUrecognisedSetFromUID(t *testing.T) {
 	t.Parallel()
 	ts := TransferSyntax{}
 	err := ts.SetFromUID("1.1.1.1.1.1.1.1")
-	if err == nil {
-		t.Fatal("SetFromUID with unrecognised UID should return error")
-	}
+	assert.Error(t, err)
 }
 
 // TestRecognisedSetFromUID tests that, given a recognised UID string, `SetFromUID` returns no error and correctly sets encoding
@@ -741,15 +608,11 @@ func TestRecognisedSetFromUID(t *testing.T) {
 	t.Parallel()
 	ts := TransferSyntax{}
 	err := ts.SetFromUID("1.2.840.10008.1.2.2")
-	if err != nil {
-		t.Fatalf("SetFromUID returned error: %v", err)
-	}
-	if ts.Encoding.ImplicitVR {
-		t.Fatalf("1.2.840.10008.1.2.2 should be Explicit VR")
-	}
-	if ts.Encoding.LittleEndian {
-		t.Fatalf("1.2.840.10008.1.2.2 should be Big Endian")
-	}
+	assert.NoError(t, err)
+
+	// ExplicitVR, BigEndian
+	assert.False(t, ts.Encoding.ImplicitVR)
+	assert.False(t, ts.Encoding.LittleEndian)
 }
 
 // TestEncodingStringRepresentation tests that the .String() method returns the expected string format
@@ -757,17 +620,11 @@ func TestEncodingStringRepresentation(t *testing.T) {
 	t.Parallel()
 	encoding := transferSyntaxToEncodingMap["1.2.840.10008.1.2"]
 	str := encoding.String()
-	expected := "ImplicitVR + LittleEndian"
-	if str != expected {
-		t.Fatalf(`got "%s" (!= "%s")`, str, expected)
-	}
+	assert.Equal(t, "ImplicitVR + LittleEndian", str)
 
 	encoding = transferSyntaxToEncodingMap["1.2.840.10008.1.2.2"]
 	str = encoding.String()
-	expected = "ExplicitVR + BigEndian"
-	if str != expected {
-		t.Fatalf(`got "%s" (!= "%s")`, str, expected)
-	}
+	assert.Equal(t, "ExplicitVR + BigEndian", str)
 }
 
 // TestUnrecognisedGetEncodingForTransferSyntax tests that, given an unrecognised TS, `GetEncodingForTransferSyntax` returns a default fallback.
@@ -775,9 +632,7 @@ func TestUnrecognisedGetEncodingForTransferSyntax(t *testing.T) {
 	t.Parallel()
 	ts := TransferSyntax{UIDEntry: &dictionary.UIDEntry{UID: "1.1.1.1.1.1"}}
 	encoding := GetEncodingForTransferSyntax(ts)
-	if encoding != transferSyntaxToEncodingMap["1.2.840.10008.1.2.1"] {
-		t.Fatalf("encoding did not match expected encoding for unrecognised TS")
-	}
+	assert.Equal(t, encoding, transferSyntaxToEncodingMap["1.2.840.10008.1.2.1"])
 }
 
 func BenchmarkParseFromBuffer(b *testing.B) {
