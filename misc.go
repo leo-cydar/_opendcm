@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -176,17 +177,21 @@ var (
 // whether the logger is enabled, and whether the output is a character device.
 type awareLogger struct {
 	*log.Logger
-	Enabled           bool
-	IsCharacterDevice bool
+	Enabled        bool
+	SupportsColour bool
 }
 
-// isCharacterDevice returns whether `f` is a character device (UNIX terminal)
-func isCharacterDevice(f *os.File) bool {
+// SupportsColour returns whether `f` is a character device (UNIX terminal)
+func SupportsColour(f *os.File) bool {
 	stat, err := f.Stat()
 	if err != nil {
 		panic(err)
 	}
-	return (stat.Mode() & os.ModeCharDevice) != 0
+	supports := (stat.Mode() & os.ModeCharDevice) != 0
+	if supports && runtime.GOOS == "windows" {
+		supports = false
+	}
+	return supports
 }
 
 // Infof calls `infolog.Output` to print to the logger.
@@ -259,7 +264,7 @@ func Error(v ...interface{}) {
 // Arguments are handled in the manner of fmt.Printf
 func Fatalf(format string, v ...interface{}) {
 	if fatallog.Enabled {
-		if fatallog.IsCharacterDevice {
+		if fatallog.SupportsColour {
 			fatallog.Output(2, "\x1b[31m"+fmt.Sprintf(format, v...)+"\x1b[0m")
 		} else {
 			fatallog.Output(2, fmt.Sprintf(format, v...))
@@ -278,7 +283,7 @@ func Fatalf(format string, v ...interface{}) {
 // Arguments are handled in the manner of fmt.Printf
 func FatalfDepth(calldepth int, format string, v ...interface{}) {
 	if fatallog.Enabled {
-		if fatallog.IsCharacterDevice {
+		if fatallog.SupportsColour {
 			fatallog.Output(calldepth, "\x1b[31m"+fmt.Sprintf(format, v...)+"\x1b[0m")
 		} else {
 			fatallog.Output(calldepth, fmt.Sprintf(format, v...))
@@ -296,7 +301,7 @@ func FatalfDepth(calldepth int, format string, v ...interface{}) {
 // Arguments are handled in the manner of fmt.Print
 func Fatal(v ...interface{}) {
 	if fatallog.Enabled {
-		if fatallog.IsCharacterDevice {
+		if fatallog.SupportsColour {
 			fatallog.Output(2, "\x1b[31m"+fmt.Sprint(v...)+"\x1b[0m")
 		} else {
 			fatallog.Output(2, fmt.Sprint(v...))
@@ -318,14 +323,14 @@ func newLogger(level string, output io.Writer) (al awareLogger) {
 		flags |= log.Lshortfile
 	}
 	// avoid colouring output if output is not an input device
-	al.IsCharacterDevice = true
+	al.SupportsColour = true
 	if file, ok := output.(*os.File); ok {
-		if !isCharacterDevice(file) {
-			al.IsCharacterDevice = false
+		if !SupportsColour(file) {
+			al.SupportsColour = false
 			al.Logger = log.New(output, fmtline, flags)
 		}
 	}
-	if al.IsCharacterDevice {
+	if al.SupportsColour {
 		al.Logger = log.New(output, fmt.Sprintf("\x1b[%dm%s\x1b[0m", colourForLevel(level), fmtline), flags)
 	}
 	return
