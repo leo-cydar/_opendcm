@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	. "github.com/b71729/opendcm" // yes, dot imports are discouraged, but otherwise prefixing everything is a pain in the arse
+	od "github.com/b71729/opendcm"
 )
 
 /*
@@ -19,18 +19,18 @@ var baseFile = filepath.Base(os.Args[0])
 
 func check(err error) {
 	if err != nil {
-		FatalfDepth(3, "error: %v", err)
+		od.FatalfDepth(3, "error: %v", err)
 	}
 }
 
 func usage() {
-	fmt.Printf("OpenDCM version %s\n", OpenDCMVersion)
+	fmt.Printf("OpenDCM version %s\n", od.OpenDCMVersion)
 	fmt.Printf("usage: %s file_or_dir\n", baseFile)
 	os.Exit(1)
 }
 
 func main() {
-	GetConfig()
+	od.GetConfig()
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
 		usage()
 	}
@@ -40,13 +40,13 @@ func main() {
 	stat, err := os.Stat(os.Args[1])
 	check(err)
 	if isDir := stat.IsDir(); !isDir {
-		dcm, err := ParseDicom(os.Args[1])
+		dcm, err := od.ParseDicom(os.Args[1])
 		check(err)
-		var elements []Element
+		var elements []od.Element
 		for _, v := range dcm.Elements {
 			elements = append(elements, v)
 		}
-		sort.Sort(ByTag(elements))
+		sort.Sort(od.ByTag(elements))
 		for _, element := range elements {
 			description := element.Describe(0)
 			for _, line := range description {
@@ -56,22 +56,22 @@ func main() {
 	} else {
 		errorCount := 0
 		successCount := 0
-		err := ConcurrentlyWalkDir(os.Args[1], func(path string) {
-			_, err := ParseDicom(path)
+		err := od.ConcurrentlyWalkDir(os.Args[1], func(path string) {
+			_, err := od.ParseDicom(path)
 			basePath := filepath.Base(path)
 			if err != nil {
-				Errorf(`error parsing "%s": %v`, basePath, err)
+				od.Errorf(`error parsing "%s": %v`, basePath, err)
 				errorCount++
 				return
 			}
 			successCount++
-			Debugf(`parsed "%s"`, basePath)
+			od.Debugf(`parsed "%s"`, basePath)
 		})
 		check(err)
 		if errorCount == 0 {
-			Infof("parsed %d files without errors", successCount)
+			od.Infof("parsed %d files without errors", successCount)
 		} else {
-			Infof("parsed %d files without errors, and failed to parse %d files", successCount, errorCount)
+			od.Infof("parsed %d files without errors, and failed to parse %d files", successCount, errorCount)
 		}
 	}
 }

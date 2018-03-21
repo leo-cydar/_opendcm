@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	. "github.com/b71729/opendcm"
+	od "github.com/b71729/opendcm"
 	"github.com/b71729/opendcm/dictionary"
 )
 
@@ -25,18 +25,18 @@ var baseFile = filepath.Base(os.Args[0])
 
 func check(err error) {
 	if err != nil {
-		FatalfDepth(3, "error: %v", err)
+		od.FatalfDepth(3, "error: %v", err)
 	}
 }
 
 func usage() {
-	fmt.Printf("OpenDCM version %s\n", OpenDCMVersion)
+	fmt.Printf("OpenDCM version %s\n", od.OpenDCMVersion)
 	fmt.Printf("usage: %s dictFromNEMA.xml out_file\n", baseFile)
 	os.Exit(1)
 }
 
 func main() {
-	GetConfig()
+	od.GetConfig()
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
 		usage()
 	}
@@ -61,7 +61,7 @@ func main() {
 	check(err)
 
 	dataElements := parseDataElements(data[posStart+7 : posEnd])
-	Infof("found %d data elements", len(dataElements))
+	od.Infof("found %d data elements", len(dataElements))
 
 	// file meta elements
 	data = data[posEnd+8:]
@@ -69,7 +69,7 @@ func main() {
 	check(err)
 
 	fileMetaElements := parseDataElements(data[posStart+7 : posEnd])
-	Infof("found %d file meta elements", len(fileMetaElements))
+	od.Infof("found %d file meta elements", len(fileMetaElements))
 
 	// directory structure elements
 	data = data[posEnd+8:]
@@ -77,7 +77,7 @@ func main() {
 	check(err)
 
 	dirStructElements := parseDataElements(data[posStart+7 : posEnd])
-	Infof("found %d directory structure elements", len(dirStructElements))
+	od.Infof("found %d directory structure elements", len(dirStructElements))
 
 	// UIDs
 	data = data[posEnd+8:]
@@ -85,7 +85,7 @@ func main() {
 	check(err)
 
 	UIDs := parseUIDs(data[posStart+7 : posEnd])
-	Infof("found %d unique identifiers (UIDs)", len(UIDs))
+	od.Infof("found %d unique identifiers (UIDs)", len(UIDs))
 
 	// build golang string
 	outF, err := os.OpenFile(os.Args[2], os.O_CREATE|os.O_WRONLY, 0666)
@@ -150,7 +150,7 @@ var UIDDictionary = map[string]*UIDEntry{
 	// write to disk
 	_, err = outF.WriteString(outCode)
 	check(err)
-	Info(`saved dictionary file to disk`)
+	od.Info(`saved dictionary file to disk`)
 }
 
 var stringRE, tagRE, uidStartRE, acceptibleVM *regexp.Regexp
@@ -204,7 +204,7 @@ func parseDataElements(data string) (elements []dictionary.DictEntry) {
 				elements[index].VR = token[:2]
 			default:
 				elements[index].VR = "UN"
-				Warnf(`using "UN" as VR instead of "%s" for tag "%s"`, token, elements[index].Tag)
+				od.Warnf(`using "UN" as VR instead of "%s" for tag "%s"`, token, elements[index].Tag)
 			}
 		case 5:
 			orIndex := strings.Index(token, " or")
@@ -212,7 +212,7 @@ func parseDataElements(data string) (elements []dictionary.DictEntry) {
 				token = token[:orIndex]
 			}
 			if !acceptibleVM.Match([]byte(token)) {
-				Warnf(`using "n" as VM instead of "%s" for tag "%s"`, token, elements[index].Tag)
+				od.Warnf(`using "n" as VM instead of "%s" for tag "%s"`, token, elements[index].Tag)
 				token = "n"
 			}
 			elements[index].VM = token

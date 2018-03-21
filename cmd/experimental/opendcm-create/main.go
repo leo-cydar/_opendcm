@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	. "github.com/b71729/opendcm"
+	od "github.com/b71729/opendcm"
 )
 
 /*
@@ -25,18 +25,18 @@ var baseFile = filepath.Base(os.Args[0])
 
 func check(err error) {
 	if err != nil {
-		FatalfDepth(3, "error: %v", err)
+		od.FatalfDepth(3, "error: %v", err)
 	}
 }
 
 func usage() {
-	fmt.Printf("OpenDCM version %s\n", OpenDCMVersion)
+	fmt.Printf("OpenDCM version %s\n", od.OpenDCMVersion)
 	fmt.Printf("usage: %s out_file\n", baseFile)
 	os.Exit(1)
 }
 
 func main() {
-	GetConfig()
+	od.GetConfig()
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
 		usage()
 	}
@@ -45,7 +45,7 @@ func main() {
 	}
 	outFileName := os.Args[1]
 	if _, err := os.Stat(outFileName); err == nil {
-		Fatalf(`file "%s" already exists`, outFileName)
+		od.Fatalf(`file "%s" already exists`, outFileName)
 	}
 
 	buffer := writeMeta()
@@ -56,10 +56,10 @@ func main() {
 	nwrite, err := f.Write(buffer)
 	check(err)
 	if nwrite != len(buffer) {
-		Fatalf("could not write all meta elements to disk. nwrite=%d bytes, size=%d bytes", nwrite, len(buffer))
+		od.Fatalf("could not write all meta elements to disk. nwrite=%d bytes, size=%d bytes", nwrite, len(buffer))
 	}
 
-	Info("wrote meta information to disk")
+	od.Info("wrote meta information to disk")
 
 	elementBuffer := make([]byte, 0)
 
@@ -258,10 +258,10 @@ func main() {
 	nwrite, err = f.Write(elementBuffer)
 	check(err)
 	if nwrite != len(elementBuffer) {
-		Fatalf("could not write all elements to disk. nwrite=%d bytes, size=%d bytes", nwrite, len(elementBuffer))
+		od.Fatalf("could not write all elements to disk. nwrite=%d bytes, size=%d bytes", nwrite, len(elementBuffer))
 	}
 
-	Info("wrote elements to disk")
+	od.Info("wrote elements to disk")
 
 	defer f.Close()
 }
@@ -329,9 +329,9 @@ func generateElementWithLength(tagString string, value []byte, VR string, length
 }
 
 // TODO: move to common
-func elementFromBuffer(buf []byte) (Element, error) {
+func elementFromBuffer(buf []byte) (od.Element, error) {
 	r := bufio.NewReader(bytes.NewReader(buf))
-	es := NewElementStream(r, int64(len(buf)))
+	es := od.NewElementStream(r, int64(len(buf)))
 	return es.GetElement()
 }
 
@@ -351,7 +351,7 @@ func writeMeta() []byte {
 	buffer = append(buffer, elementBytes...)
 
 	// 0002,0003 Media Storage SOP Instance UID
-	randUID, err := NewRandInstanceUID()
+	randUID, err := od.NewRandInstanceUID()
 	check(err)
 	elementBytes, err = generateElement("0002,0003", []byte(randUID), "UI")
 	check(err)
@@ -363,12 +363,12 @@ func writeMeta() []byte {
 	buffer = append(buffer, elementBytes...)
 
 	// 0002,0012 Implementation Class UID
-	elementBytes, err = generateElement("0002,0012", []byte(GetImplementationUID(true)), "UI")
+	elementBytes, err = generateElement("0002,0012", []byte(od.GetImplementationUID(true)), "UI")
 	check(err)
 	buffer = append(buffer, elementBytes...)
 
 	// (0002,0013)    Implementation Version Name    opendcm-0.1
-	elementBytes, err = generateElement("0002,0013", []byte(fmt.Sprintf("opendcm-%s", OpenDCMVersion)), "SH")
+	elementBytes, err = generateElement("0002,0013", []byte(fmt.Sprintf("opendcm-%s", od.OpenDCMVersion)), "SH")
 	check(err)
 	buffer = append(buffer, elementBytes...)
 

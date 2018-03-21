@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	. "github.com/b71729/opendcm"
+	od "github.com/b71729/opendcm"
 )
 
 /*
@@ -22,18 +22,18 @@ var baseFile = filepath.Base(os.Args[0])
 
 func check(err error) {
 	if err != nil {
-		FatalfDepth(3, "error: %v", err)
+		od.FatalfDepth(3, "error: %v", err)
 	}
 }
 
 func usage() {
-	fmt.Printf("OpenDCM version %s\n", OpenDCMVersion)
+	fmt.Printf("OpenDCM version %s\n", od.OpenDCMVersion)
 	fmt.Printf("usage: %s in_dir out_dir\n", baseFile)
 	os.Exit(1)
 }
 
 func main() {
-	GetConfig()
+	od.GetConfig()
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
 		usage()
 	}
@@ -47,24 +47,24 @@ func main() {
 	statIn, err := os.Stat(dirIn)
 	check(err)
 	if !statIn.IsDir() {
-		Fatalf(`"%s" is not a directory. please provide a directory`, dirIn)
+		od.Fatalf(`"%s" is not a directory. please provide a directory`, dirIn)
 	}
 
 	statOut, err := os.Stat(dirOut)
 	check(err)
 	if !statOut.IsDir() {
-		Fatalf(`"%s" is not a directory. please provide a directory`, dirOut)
+		od.Fatalf(`"%s" is not a directory. please provide a directory`, dirOut)
 	}
 
 	seriesInstanceUIDs := make(map[string]bool, 0)
-	ConcurrentlyWalkDir(dirIn, func(filePath string) {
-		dcm, err := ParseDicom(filePath)
+	od.ConcurrentlyWalkDir(dirIn, func(filePath string) {
+		dcm, err := od.ParseDicom(filePath)
 		check(err)
 		if e, found := dcm.GetElement(0x0020000E); found {
 			if val, ok := e.Value().(string); ok {
 				_, found := seriesInstanceUIDs[val]
 				if !found {
-					Infof("found unique: %s", val)
+					od.Infof("found unique: %s", val)
 					seriesInstanceUIDs[val] = true
 					outputFilePath := filepath.Join(dirOut, fmt.Sprintf("%s.dcm", val))
 					if _, err := os.Stat(outputFilePath); os.IsNotExist(err) {
@@ -72,7 +72,7 @@ func main() {
 						err := copy(dcm.FilePath, outputFilePath)
 						check(err)
 					} else {
-						Infof(`skip "%s": file exists`, outputFilePath)
+						od.Infof(`skip "%s": file exists`, outputFilePath)
 					}
 				}
 			}
