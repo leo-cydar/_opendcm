@@ -1,6 +1,6 @@
 <h1 align="center">OpenDCM</h1>
 <p align="center">
-  <i>A set of modern, blazingly fast DICOM tools, including a fully-fledged server (SCP).</i>
+  <i>A set of lightweight, feature-rich DICOM tools, including a fully-fledged server (SCP).</i>
 </p>
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/b71729/opendcm)](https://goreportcard.com/report/github.com/b71729/opendcm) [![Build Status](https://travis-ci.org/b71729/opendcm.svg?branch=master)](https://travis-ci.org/b71729/opendcm)
