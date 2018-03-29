@@ -27,7 +27,9 @@ const OpenDCMRootUID = "1.2.826.0.1.3680043.9.7484."
 
 // OpenDCMVersion equals the current (or aimed for) version of the software.
 // It is used commonly in creating ImplementationClassUID(0002,0012)
-const OpenDCMVersion = "0.1"
+const OpenDCMVersion = "0.2"
+
+const SCPMaxBytes = 2 * 1024 * 1024
 
 // ExitOnFatalLog specifies whether the application should `os.Exit(1)` on a fatal log message
 var ExitOnFatalLog = true
@@ -46,6 +48,11 @@ type Config struct {
 
 	// DicomReadBufferSize is the number of bytes to be buffered from disk when parsing dicoms
 	DicomReadBufferSize int
+
+	// AET
+	AET        string
+	AEBindIP   string
+	AEBindPort int
 
 	// do not access / write `_set`. It is used internally.
 	_set bool
@@ -116,6 +123,9 @@ func GetConfig() Config {
 		config.StrictMode = boolFromEnvDefault("OPENDCM_STRICTMODE", false)
 		config.DicomReadBufferSize = intFromEnvDefault("OPENDCM_BUFFERSIZE", 2*1024*1024)
 		config.LogLevel = strings.ToLower(strFromEnvDefault("OPENDCM_LOGLEVEL", "info"))
+		config.AET = strFromEnvDefault("OPENDCM_AET", "OPENDCM")
+		config.AEBindIP = strFromEnvDefault("OPENDCM_AEIP", "0.0.0.0")
+		config.AEBindPort = intFromEnvDefault("OPENDCM_AEPORT", 6789)
 		switch config.LogLevel {
 		case "debug", "info", "warn", "error", "fatal", "none", "disabled", "0", "1", "2", "3", "4", "5":
 			SetLoggingLevel(config.LogLevel)
