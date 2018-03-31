@@ -4,11 +4,22 @@ package opendcm
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 
 	"github.com/b71729/bin"
 )
+
+// Sequence Delimitation Item (FFFE,E0DD)
+var seqDelimTag = uint32(0xFFFEE0DD)
+
+// Item Delimitation Item (FFFE,E00D),
+var itemDelimTag = uint32(0xFFFEE00D)
+
+// Item (FFFE,E000)
+var itemTag = uint32(0xFFFEE000)
+
+// PixelData (7FE0,0010)
+var pixelDataTag = uint32(0x7FE00010)
 
 /*
 ===============================================================================
@@ -48,10 +59,13 @@ func (ds *DataSet) Len() int {
 // GetImplementationVersionName is an experimental method to debug
 // retrieval of elements from the DataSet. Will likely be removed.
 func (ds *DataSet) GetImplementationVersionName(dst *string) bool {
-	e := Element{}
+	// initialise a new element to hold version name data
+	e := NewElement()
+	// check whether the element exists in the dataset map
 	if found := ds.GetElement(0x00020013, &e); !found {
 		return false
 	}
+	// if it exists, write the data directly into destination
 	*dst = string(e.GetDataBytes())
 	return true
 }
@@ -60,10 +74,13 @@ func (ds *DataSet) GetImplementationVersionName(dst *string) bool {
 //
 // Note: this is quite an expensive operation and may incur many allocations
 func (ds *DataSet) GetElements() []Element {
+	// initialise a variable-length array of elements
 	elements := []Element{}
+	// for each element in the map, add it to the newly-created array
 	for _, e := range *ds {
 		elements = append(elements, e)
 	}
+	// and return said array to the callee
 	return elements
 }
 
@@ -170,6 +187,7 @@ func (elr *ElementReader) IsLittleEndian() bool {
 // SetLittleEndian setswhether this ElementReader should parse
 // data according to Little Endian byte ordering.
 func (elr *ElementReader) SetLittleEndian(isLittleEndian bool) {
+	// set using the "encoding/binary" package
 	if isLittleEndian {
 		elr.br.SetByteOrder(binary.LittleEndian)
 	} else {
@@ -189,94 +207,21 @@ func (elr *ElementReader) SetImplicitVR(isImplicitVR bool) {
 	elr.implicit = isImplicitVR
 }
 
-// readUndefinedLength attempts to read any number of items that are present
-// inside the current Element.
-//
-// If `readElements` is true, each embedded Item will be expected to contain complete Elements
-// , as would be expected if the source VR is "SQ".
-// If `readElements` is false, the data inside each item will not be decoded.
-// This may be the case if the source VR is for instance OB/OW.
-//
-// Should be careful calling this, as it assumes specific Reader offset.
-func (elr *ElementReader) readUndefinedLength(readElements bool, dst *[]Item) error {
-	// read undefined length element
-	for {
-		item := NewItem()
-		if elr.err = elr.readTag(&elr.ui32); elr.err != nil {
-			return elr.err
-		}
-
-		// check if tag is SequenceDelimitationItem (cause for exiting loop)
-		if elr.ui32 == 0xFFFEE0DD {
-			if elr.err = elr.br.Discard(4); elr.err != nil {
-				return elr.err
-			}
-			break
-		}
-
-		// if tag is not StartItem, something has gone wrong
-		if elr.ui32 != 0xFFFEE000 {
-			return fmt.Errorf("elr.ui32 = %08X (!= 0xFFFEE000)", elr.ui32)
-		}
-
-		// read element length (always 4 bytes here)
-		if elr.err = elr.br.ReadUint32(&elr.ui32); elr.err != nil {
-			return elr.err
-		}
-
-		// an item may be of undefined length; in which case, it can contain
-		// multiple elements:
-		if elr.ui32 == 0xFFFFFFFF {
-			for {
-				e := Element{}
-				if elr.err = elr.ReadElement(&e); elr.err != nil {
-					return elr.err
-				}
-				if e.GetTag() == 0xFFFEE00D {
-					// reached end of item
-					break
-				}
-				item.dataset.AddElement(e)
-			}
-		} else {
-			if elr.ui32 == 0 {
-				continue
-				/* Turns out the data set had bytes:
-				   (40 00 08 00) (53 51)  00 00 (FF FF  FF FF) (FE FF  00 E0) (00 00  00 00) (FE FF  DD E0) 00 00
-				   (4b: tag)     (2b:SQ)        (4b: un.len)   (4b:itm start) (4b: 0 len)    (4b: seq end)
-				   Therefore, the item genuinely had length of zero.
-				   This condition accounts for this possibility.
-				*/
-			}
-			if readElements {
-				e := Element{}
-				if elr.err = elr.ReadElement(&e); elr.err != nil {
-					return elr.err
-				}
-				item.dataset.AddElement(e)
-			} else {
-				item.unparsed = make([]byte, elr.ui32)
-				if elr.err = elr.br.ReadBytes(item.unparsed); elr.err != nil {
-					return elr.err
-				}
-			}
-		}
-		*dst = append(*dst, item)
-	}
-	return nil
-}
-
 // readElementVR attempts to read/decode the "VR" component of an Element
 // into `dst`.
 //
 // Should be careful calling this, as it assumes specific Reader offset.
 func (elr *ElementReader) readElementVR(dst *Element) error {
-	if !elr.IsImplicitVR() {
-		if elr.err = elr.br.ReadBytes(elr._1kb[:2]); elr.err != nil {
-			return elr.err
-		}
-		dst.vr = string(elr._1kb[:2])
+	// if Implicit VR, nothing needs to be read
+	if elr.IsImplicitVR() {
+		return nil
 	}
+	// otherwise take two bytes from the reader
+	if elr.err = elr.br.ReadBytes(elr._1kb[:2]); elr.err != nil {
+		return elr.err
+	}
+	// and write vr into destination element
+	dst.vr = string(elr._1kb[:2])
 	return nil
 }
 
@@ -285,6 +230,7 @@ func (elr *ElementReader) readElementVR(dst *Element) error {
 //
 // Should be careful calling this, as it assumes specific Reader offset.
 func (elr *ElementReader) readElementTag(dst *Element) error {
+	// return tag written directly into destination element
 	return elr.readTag(&dst.tag)
 }
 
@@ -307,15 +253,167 @@ func (elr *ElementReader) readElementLength(dst *Element) error {
 			if elr.err = elr.br.Discard(2); elr.err != nil {
 				return elr.err
 			}
+			// and read length as 32 bits
 			if elr.err = elr.br.ReadUint32(&dst.datalen); elr.err != nil {
 				return elr.err
 			}
 		default:
+			// read length as 16 bits
 			if elr.err = elr.br.ReadUint16(&elr.ui16); elr.err != nil {
 				return elr.err
 			}
 			dst.datalen = uint32(elr.ui16)
 		}
+	}
+	return nil
+}
+
+func (elr *ElementReader) tagFromBytes(src []byte) uint32 {
+	if elr.IsLittleEndian() {
+		return uint32(src[2]) |
+			uint32(src[3])<<8 |
+			uint32(src[0])<<16 |
+			uint32(src[1])<<24
+	}
+	return uint32(src[3]) |
+		uint32(src[2])<<8 |
+		uint32(src[1])<<16 |
+		uint32(src[0])<<24
+}
+
+func (elr *ElementReader) hasReachedTag(tag uint32) (bool, error) {
+	// peek 4 bytes
+	if elr.err = elr.br.Peek(elr._1kb[:4]); elr.err != nil {
+		return false, elr.err
+	}
+	// decode tag from those four bytes
+	elr.ui32 = elr.tagFromBytes(elr._1kb[:4])
+	// return tag == "input_tag"
+	return (elr.ui32 == tag), nil
+}
+
+func shouldReadEmbeddedElements(e Element) bool {
+	// if tag is PixelData, return false
+	return e.GetTag() != pixelDataTag
+	// else return true
+}
+
+func (elr *ElementReader) readItemUndefLength(readEmbeddedElements bool, dst *Item) error {
+	// for
+	for {
+		// check if we have reached item delimitation tag
+		if elr._bool, elr.err = elr.hasReachedTag(itemDelimTag); elr.err != nil {
+			return elr.err
+		}
+		// if so, exit the loop
+		if elr._bool == true {
+			break
+		}
+		if readEmbeddedElements {
+			// initialise empty element
+			e := NewElement()
+			// read element("dest")
+			if elr.err = elr.ReadElement(&e); elr.err != nil {
+				return elr.err
+			}
+			// add element to item.dataset
+			dst.dataset.AddElement(e)
+			continue
+		}
+		// we are not reading embedded elemebts, instead extend "unparsed" by four bytes
+		dst.unparsed = append(dst.unparsed, make([]byte, 4)...)
+		// and read from the stream
+		if elr.err = elr.br.ReadBytes(dst.unparsed[len(dst.unparsed)-4:]); elr.err != nil {
+			return elr.err
+		}
+	}
+	// discard 8
+	return elr.br.Discard(8)
+	// finished
+}
+
+func (elr *ElementReader) readItem(readEmbeddedElements bool, dst *Item) error {
+	// read item-tag
+	if elr.err = elr.readTag(&elr.ui32); elr.err != nil {
+		return elr.err
+	}
+	// is item-tag not ItemStartTag?
+	// not ItemStartTag:
+	if elr.ui32 != itemTag {
+		// 	raise error
+		return errors.New("did not find ItemStartTag")
+	}
+
+	// read item-length
+	if elr.err = elr.br.ReadUint32(&elr.ui32); elr.err != nil {
+		return elr.err
+	}
+	// is item of undef. length?
+	if elr.ui32 == 0xFFFFFFFF {
+		// yes:
+		// read_item_undefined_length(input)
+		if elr.err = elr.readItemUndefLength(readEmbeddedElements, dst); elr.err != nil {
+			return elr.err
+		}
+		return nil
+	}
+
+	if elr.ui32 == 0 {
+		return nil
+		/* Turns out the data set had bytes:
+		   (40 00 08 00) (53 51)  00 00 (FF FF  FF FF) (FE FF  00 E0) (00 00  00 00) (FE FF  DD E0) 00 00
+		   (4b: tag)     (2b:SQ)        (4b: un.len)   (4b:itm start) (4b: 0 len)    (4b: seq end)
+		   Therefore, the item genuinely had length of zero.
+		   This condition accounts for this possibility.
+		*/
+	}
+
+	// if "read_elements":
+	if readEmbeddedElements {
+		// end_pos = cur_pos + item.length
+		endPos := elr.br.GetPosition() + int64(elr.ui32)
+		// for cur_pos < end_pos:
+		for elr.br.GetPosition() < endPos {
+			// 	initialise empty element
+			e := NewElement()
+			// 	read element(empty element)
+			if elr.err = elr.ReadElement(&e); elr.err != nil {
+				return elr.err
+			}
+			// 	add element to "dest".dataset
+			dst.dataset.AddElement(e)
+			// 	continue
+		}
+		return nil
+	}
+
+	// # not reading elements - read bytes and store
+	// initialise "dest".unparsed to length of element
+	dst.unparsed = make([]byte, elr.ui32)
+	// "dest".unparsed <- read len X bytes
+	return elr.br.ReadBytes(dst.unparsed)
+}
+
+func (elr *ElementReader) readElementDataUndefLength(dst *Element) error {
+	// for
+	for {
+		// if has_reached_tag(SeqDelimTag), break.
+		if elr._bool, elr.err = elr.hasReachedTag(seqDelimTag); elr.err != nil {
+			return elr.err
+		}
+		if elr._bool {
+			break
+		}
+		// initialise empty_item
+		item := NewItem()
+		// read_item(should_read_embedded_elements("dest"), empty_item)
+		elr.readItem(shouldReadEmbeddedElements(*dst), &item)
+		// add empty_item to "dest".items
+		dst.items = append(dst.items, item)
+	}
+	// discard 8
+	if elr.err = elr.br.Discard(8); elr.err != nil {
+		return elr.err
 	}
 	return nil
 }
@@ -327,10 +425,32 @@ func (elr *ElementReader) readElementLength(dst *Element) error {
 //
 // Should be careful calling this, as it assumes specific Reader offset.
 func (elr *ElementReader) readElementData(dst *Element) error {
-	if dst.datalen == 0xFFFFFFFF { // undefined length
-		return elr.readUndefinedLength(dst.GetVR() == "SQ", &dst.items)
+
+	// is "dest" of undef. length?
+	if dst.datalen == 0xFFFFFFFF {
+		// read_element_data_undef_length("dest")
+		// return
+		return elr.readElementDataUndefLength(dst)
 	}
+	// is "dest" instead a SQ with defined length?
+	if dst.GetVR() == "SQ" {
+		endPos := elr.br.GetPosition() + int64(dst.datalen)
+		for elr.br.GetPosition() < endPos {
+			// initialise empty_item
+			item := NewItem()
+			// read_item(should_read_embedded_elements("dest"), empty_item)
+			if elr.err = elr.readItem(shouldReadEmbeddedElements(*dst), &item); elr.err != nil {
+				return elr.err
+			}
+			// add empty_item to "dest".items
+			dst.items = append(dst.items, item)
+		}
+		return nil
+	}
+	// otherwise, its "defined length, non-SQ", read as arbitrary bytes
+	// initialise dest to length of element
 	dst.data = make([]byte, dst.datalen)
+	// "dest" <- read len X bytes
 	return elr.br.ReadBytes(dst.data)
 }
 
@@ -364,18 +484,7 @@ func (elr *ElementReader) readTag(dst *uint32) error {
 	if elr.err = elr.br.ReadBytes(elr._1kb[:4]); elr.err != nil {
 		return elr.err
 	}
-	_ = elr._1kb[3] // bounds check hint to compiler; see golang.org/issue/14808
-	if elr.IsLittleEndian() {
-		*dst = uint32(elr._1kb[2]) |
-			uint32(elr._1kb[3])<<8 |
-			uint32(elr._1kb[0])<<16 |
-			uint32(elr._1kb[1])<<24
-	} else {
-		*dst = uint32(elr._1kb[3]) |
-			uint32(elr._1kb[2])<<8 |
-			uint32(elr._1kb[1])<<16 |
-			uint32(elr._1kb[0])<<24
-	}
+	*dst = elr.tagFromBytes(elr._1kb[:4])
 	return nil
 }
 
@@ -383,12 +492,19 @@ func (elr *ElementReader) readTag(dst *uint32) error {
 // (Implicit/Explicit VR, Big/Little Endian)
 // `buf` should be of length six.
 func (elr *ElementReader) determineEncoding(buf []byte) error {
+	// check for six bytes: four for tag, and two for VR
 	if len(buf) != 6 {
 		return errors.New("determineEncoding(buf): need six bytes")
 	}
-	// here we need six bytes: four for tag, and two for VR
+
+	// if the upper component of tag is less than 2000, or is 7FE0
+	// (PixelData), we can be fairly certain the file is using
+	// little endian encoding
 	elr.ui16 = binary.LittleEndian.Uint16(buf[0:2])
 	elr.SetLittleEndian(elr.ui16 < 2000 || elr.ui16 == 0x7FE0)
+
+	// to determine implicit / explicit VR, check the next two
+	// bytes against known VRs
 	vrfrombytes := string(buf[4:6])
 	elr.SetImplicitVR(true)
 	elr._bool = true
@@ -399,6 +515,7 @@ func (elr *ElementReader) determineEncoding(buf []byte) error {
 			break
 		}
 	}
+	// encoding should have been determined by this stage
 	elr.SetImplicitVR(elr._bool)
 	Debugf("Determined Encoding: ImplicitVR: %v, LittleEndian: %v", elr.IsImplicitVR(), elr.IsLittleEndian())
 	return nil
@@ -410,10 +527,11 @@ func (elr *ElementReader) determineEncoding(buf []byte) error {
 // For futureproofing, it is suggested to use these constructors rather than
 // manually creating an instance (i.e. `elr := ElementReader{}`)
 func NewElementReader(source bin.Reader) (er ElementReader) {
+	// create an instance of the element reader with the source set
 	er = ElementReader{
 		br: source,
 	}
-	// ElementReader defaults to Implicit VR Little Endian: Default Transfer Syntax for DICOM
+	// default to "Implicit VR Little Endian: Default Transfer Syntax for DICOM"
 	er.SetImplicitVR(true)
 	er.SetLittleEndian(true)
 	return er
@@ -438,10 +556,12 @@ type ElementWriter struct {
 // For futureproofing, it is suggested to use these constructors rather than
 // manually creating an instance (i.e. `elw := ElementWriter{}`)
 func NewElementWriter(dest io.Writer) ElementWriter {
+	// create an instance of the element writer with the destination
+	// wrapped in a binary writer
 	ew := ElementWriter{
 		bw: bin.NewWriter(dest, binary.LittleEndian),
 	}
-	// ElementWriter defaults to Implicit VR Little Endian: Default Transfer Syntax for DICOM
+	// default to "Implicit VR Little Endian: Default Transfer Syntax for DICOM"
 	ew.SetImplicitVR(true)
 	ew.SetLittleEndian(true)
 	return ew
@@ -456,6 +576,7 @@ func (elw *ElementWriter) IsLittleEndian() bool {
 // SetLittleEndian setswhether this ElementWriter should encode
 // data according to Little Endian byte ordering.
 func (elw *ElementWriter) SetLittleEndian(isLittleEndian bool) {
+	// set using the "encoding/binary" package
 	if isLittleEndian {
 		elw.bw.SetByteOrder(binary.LittleEndian)
 	} else {
@@ -479,9 +600,11 @@ func (elw *ElementWriter) SetImplicitVR(isImplicitVR bool) {
 //
 // Should be careful calling this, as it assumes specific Writer offset.
 func (elw *ElementWriter) writeElementTag(src Element) error {
+	// write the upper component
 	if elw.err = elw.bw.WriteUint16(uint16(src.GetTag() >> 16)); elw.err != nil {
 		return elw.err
 	}
+	// then the lower component
 	return elw.bw.WriteUint16(uint16(src.GetTag()))
 }
 
@@ -489,12 +612,14 @@ func (elw *ElementWriter) writeElementTag(src Element) error {
 //
 // Should be careful calling this, as it assumes specific Writer offset.
 func (elw *ElementWriter) writeElementVR(src Element) error {
-	if !elw.IsImplicitVR() {
-		elw._1kb[0] = src.GetVR()[0]
-		elw._1kb[1] = src.GetVR()[1]
-		return elw.bw.WriteBytes(elw._1kb[:2])
+	// if Implicit VR, nothing needs to be written
+	if elw.IsImplicitVR() {
+		return nil
 	}
-	return nil
+	elw._1kb[0] = src.GetVR()[0]
+	elw._1kb[1] = src.GetVR()[1]
+	return elw.bw.WriteBytes(elw._1kb[:2])
+
 }
 
 // writeElementLength attempts to write the "Length" component of `src`
@@ -519,18 +644,6 @@ func (elw *ElementWriter) writeElementLength(src Element) error {
 	}
 }
 
-// writeElementData attempts to write the "Data" component of `src`
-// In the event that the length is 0xFFFFFFFF (undefined), embedded contents will
-// be encoded, as per: http://dicom.nema.org/dicom/2013/output/chtml/part05/sect_7.5.html
-//
-// Should be careful calling this, as it assumes specific Writer offset.
-func (elw *ElementWriter) writeElementData(src Element) error {
-	if src.datalen == 0xFFFFFFFF {
-		return errors.New("unsupported")
-	}
-	return elw.bw.WriteBytes(src.data)
-}
-
 // WriteElement attempts to completely write `src`
 //
 // All types of elements are expected to be compatible.
@@ -551,5 +664,7 @@ func (elw *ElementWriter) WriteElement(src Element) error {
 	}
 
 	// write contents
-	return elw.writeElementData(src)
+	// TODO
+	//return elw.writeElementData(src)
+	return nil
 }
