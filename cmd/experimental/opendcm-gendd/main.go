@@ -95,10 +95,8 @@ package dictionary
 
 import "fmt"
 
-type Tag uint32
-
 type DictEntry struct {
-	Tag       Tag
+	Tag       uint32
 	NameHuman string
 	Name      string
 	VR        string
@@ -112,10 +110,8 @@ type UIDEntry struct {
 	NameHuman string
 }
 
-func (t Tag) String() string {
-	upper := uint16(t >> 16)
-	lower := uint16(t)
-	return fmt.Sprintf("(%04X,%04X)", upper, lower)
+func (de DictEntry) String() string {
+	return fmt.Sprintf("(%04X,%04X): %s", uint16(de.Tag >> 16), uint16(de.Tag), de.Name)
 }
 
 // DicomDictionary provides a mapping between uint32 representation of a DICOM Tag and a DictEntry pointer.
@@ -123,17 +119,17 @@ var DicomDictionary = map[uint32]*DictEntry{
 `
 	outCode += "	// File Meta Elements\n"
 	for _, v := range fileMetaElements {
-		outCode += fmt.Sprintf(`	0x%08X: {Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", Retired: %v},`, uint32(v.Tag), uint32(v.Tag), v.Name, v.NameHuman, v.VR, v.Retired) + "\n"
+		outCode += fmt.Sprintf(`	0x%08X: {Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", Retired: %v},`, v.Tag, v.Tag, v.Name, v.NameHuman, v.VR, v.Retired) + "\n"
 	}
 
 	outCode += "	// Directory Structure Elements\n"
 	for _, v := range dirStructElements {
-		outCode += fmt.Sprintf(`	0x%08X: {Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", VM: "%s", Retired: %v},`, uint32(v.Tag), uint32(v.Tag), v.Name, v.NameHuman, v.VR, v.VM, v.Retired) + "\n"
+		outCode += fmt.Sprintf(`	0x%08X: {Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", VM: "%s", Retired: %v},`, v.Tag, v.Tag, v.Name, v.NameHuman, v.VR, v.VM, v.Retired) + "\n"
 	}
 
 	outCode += "	// Data Elements\n"
 	for _, v := range dataElements {
-		outCode += fmt.Sprintf(`	0x%08X: {Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", VM: "%s", Retired: %v},`, uint32(v.Tag), uint32(v.Tag), v.Name, v.NameHuman, v.VR, v.VM, v.Retired) + "\n"
+		outCode += fmt.Sprintf(`	0x%08X: {Tag: 0x%08X, Name: "%s", NameHuman: "%s", VR: "%s", VM: "%s", Retired: %v},`, v.Tag, v.Tag, v.Name, v.NameHuman, v.VR, v.VM, v.Retired) + "\n"
 	}
 
 	outCode += `}
@@ -188,7 +184,7 @@ func parseDataElements(data string) (elements []dictionary.DictEntry) {
 			tagString = strings.Replace(tagString, ",", "", 1)
 			tagInt, err := strconv.ParseUint(tagString, 16, 32)
 			check(err)
-			elements[index].Tag = dictionary.Tag(tagInt)
+			elements[index].Tag = uint32(tagInt)
 			elements[index].Retired = false
 		case 2:
 			elements[index].NameHuman = token
