@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 
 	od "github.com/b71729/opendcm"
 )
@@ -40,24 +39,33 @@ func main() {
 	stat, err := os.Stat(os.Args[1])
 	check(err)
 	if isDir := stat.IsDir(); !isDir {
-		dcm, err := od.ParseDicom(os.Args[1])
+		dcm := od.NewDicom()
+		err := dcm.FromFile(os.Args[1])
 		check(err)
-		var elements []od.Element
-		for _, v := range dcm.Elements {
-			elements = append(elements, v)
+		// var elements []od.Element
+		// for _, v := range dcm.Elements {
+		// 	elements = append(elements, v)
+		// }
+		// sort.Sort(od.ByTag(elements))
+		for _, element := range *dcm.GetDataSet() {
+			// description := element.Describe(0)
+			// for _, line := range description {
+			// 	fmt.Println(line)
+			// }
+			fmt.Printf("%08x = %v\n", element.GetTag(), element.GetName())
 		}
-		sort.Sort(od.ByTag(elements))
-		for _, element := range elements {
-			description := element.Describe(0)
-			for _, line := range description {
-				fmt.Println(line)
-			}
-		}
+		name := ""
+		var e = od.NewElement()
+		dcm.GetDataSet().GetElement(0x00100010, &e)
+		e.GetValue(&name)
+		fmt.Printf("PatientName = %s\n", name)
 	} else {
 		errorCount := 0
 		successCount := 0
 		err := od.ConcurrentlyWalkDir(os.Args[1], func(path string) {
-			_, err := od.ParseDicom(path)
+			dcm := od.NewDicom()
+			err := dcm.FromFile(path)
+			check(err)
 			basePath := filepath.Base(path)
 			if err != nil {
 				od.Errorf(`error parsing "%s": %v`, basePath, err)
