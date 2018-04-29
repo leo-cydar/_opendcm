@@ -275,7 +275,7 @@ func TestFatalLoggerEnabled(t *testing.T) {
 	Fatal("message")
 	FatalfDepth(1, "%s", "message with depth")
 	logEntries := getLogEntries(buf)
-	assert.Len(t, logEntries, 3)
+	assert.True(t, len(logEntries) > 10) // including stack
 }
 
 func TestFatalLoggerDisabled(t *testing.T) {

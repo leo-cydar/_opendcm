@@ -11,34 +11,34 @@ import (
 
 /*
 ===============================================================================
-    DicomFile
+    Dicom
 ===============================================================================
 */
 
-// DicomFile represents a file containing one SOP Instance
+// Dicom represents a file containing one SOP Instance
 // as per http://dicom.nema.org/dicom/2013/output/chtml/part10/chapter_7.html
-type DicomFile struct {
+type Dicom struct {
 	dataset  DataSet
 	preamble [128]byte
 	tmpBuffers
 }
 
 // GetPreamble returns the "preamble" component
-func (df *DicomFile) GetPreamble() [128]byte {
-	return df.preamble
+func (dcm *Dicom) GetPreamble() [128]byte {
+	return dcm.preamble
 }
 
 // GetDataSet returns the parsed DataSet (elements)
-func (df *DicomFile) GetDataSet() *DataSet {
-	return &df.dataset
+func (dcm *Dicom) GetDataSet() *DataSet {
+	return &dcm.dataset
 }
 
-// NewDicomFile returns a fresh DicomFile suitable for parsing
+// NewDicom returns a fresh Dicom suitable for parsing
 // dicom data.
-func NewDicomFile() DicomFile {
-	df := DicomFile{}
-	df.dataset = NewDataSet()
-	return df
+func NewDicom() Dicom {
+	dcm := Dicom{}
+	dcm.dataset = NewDataSet()
+	return dcm
 }
 
 // tmpBuffers provides an assortment of temporary variables used internally
@@ -67,17 +67,17 @@ var RecognisedVRs = []string{
 }
 
 // attemptReadPreamble attempts to decode the "preamble"
-func (df *DicomFile) attemptReadPreamble(br *bin.Reader) (bool, error) {
+func (dcm *Dicom) attemptReadPreamble(br *bin.Reader) (bool, error) {
 	preamble := make([]byte, 132)
-	if df.err = br.Peek(preamble); df.err != nil {
-		return false, df.err
+	if dcm.err = br.Peek(preamble); dcm.err != nil {
+		return false, dcm.err
 	}
 	if bytes.Compare(preamble[128:132], dicmTestString) != 0 {
-		return false, df.err
+		return false, dcm.err
 	}
 
 	// dicm magic has a match. save preamble and discard bytes from stream
-	copy(df.preamble[:], preamble[:128])
+	copy(dcm.preamble[:], preamble[:128])
 	br.Discard(132)
 	return true, nil
 }
@@ -85,15 +85,15 @@ func (df *DicomFile) attemptReadPreamble(br *bin.Reader) (bool, error) {
 // FromReader decodes a dicom file from `source`, returning an error
 // if something went wrong during the process.
 // This takes ownership of `source`; do not use it after passing through.
-func (df *DicomFile) FromReader(source io.Reader) error {
+func (dcm *Dicom) FromReader(source io.Reader) error {
 	binaryReader := bin.NewReader(source, binary.LittleEndian)
 
 	// attempt to parse preamble
-	df._bool, df.err = df.attemptReadPreamble(&binaryReader)
-	if df.err != nil {
-		return df.err
+	dcm._bool, dcm.err = dcm.attemptReadPreamble(&binaryReader)
+	if dcm.err != nil {
+		return dcm.err
 	}
-	if !df._bool {
+	if !dcm._bool {
 		Debug("file is missing preamble/magic (bytes 0-132)")
 	}
 
@@ -104,55 +104,78 @@ func (df *DicomFile) FromReader(source io.Reader) error {
 
 	// read elements
 	inMeta := true
+	// initialise array of elements
+	elements := make([]Element, 0)
+	e := NewElement()
 	for {
 		if inMeta {
 			// if in meta section, we should read the first two
 			// bytes (first component of tag) to determine whether
 			// we have reached boundary of meta section
-			if df.err = elr.br.Peek(df._1kb[:2]); df.err != nil {
-				if df.err == io.EOF {
-					return nil
+			if dcm.err = elr.br.Peek(dcm._1kb[:2]); dcm.err != nil {
+				if dcm.err == io.EOF {
+					break
 				}
-				return df.err
+				return dcm.err
 			}
 			// if the first component is not (0002), we have reached end
 			// of meta section
-			if binary.LittleEndian.Uint16(df._1kb[:2]) != 0x0002 {
+			if binary.LittleEndian.Uint16(dcm._1kb[:2]) != 0x0002 {
 				inMeta = false
 				// determine binary encoding of non-meta section
 				// we do this by peeking six bytes from the reader
 				// and passing through to `determineEncoding`
-				if df.err = elr.br.Peek(df._1kb[:6]); df.err != nil {
-					if df.err == io.EOF {
-						return nil
+				if dcm.err = elr.br.Peek(dcm._1kb[:6]); dcm.err != nil {
+					if dcm.err == io.EOF {
+						break
 					}
-					return df.err
+					return dcm.err
 				}
-				elr.determineEncoding(df._1kb[:6])
+				elr.determineEncoding(dcm._1kb[:6])
 			}
 		}
-		e := Element{}
-		if df.err = elr.ReadElement(&e); df.err != nil {
-			if df.err == io.EOF {
-				return nil
+		if dcm.err = elr.ReadElement(&e); dcm.err != nil {
+			if dcm.err == io.EOF {
+				break
 			}
-			return df.err
+			return dcm.err
 		}
-		Debugf("Adding element: %08X (%s) @ %d", e.GetTag(), e.GetVR(), elr.br.GetPosition())
-		df.GetDataSet().AddElement(e)
+		//Debugf("Adding element: %s [%s] @ %d", e.dictEntry, e.GetVR(), elr.br.GetPosition())
+		if e.GetTag() == 0x00080005 {
+			dcm.GetDataSet().AddElement(e)
+		} else {
+			elements = append(elements, e)
+		}
 	}
+
+	// we must re-encode the parsed elements from their native characterset into UTF-8:
+	// lookup character set according to the pre-defined table
+	cs := dcm.GetDataSet().GetCharacterSet()
+	Debugf("CS: %v", cs.Name)
+	decoder := cs.Encoding.NewDecoder()
+	// for each element in dataset:
+	for _, e = range elements {
+		// 	is it of ("SH", "LO", "ST", "PN", "LT", "UT")?
+		switch e.GetVR() {
+		case "SH", "LO", "ST", "PN", "LT", "UT":
+			// if so, decode data in-place
+			e.data, _ = decoder.Bytes(e.data) // this will not result in an error as replacement runes are enforced
+		}
+		dcm.GetDataSet().AddElement(e)
+	}
+	return nil
 }
 
 // FromFile decodes a dicom file from the given file path
 // See: FromReader for more information
-func (df *DicomFile) FromFile(path string) error {
+func (dcm *Dicom) FromFile(path string) error {
 	var f *os.File
-	if f, df.err = os.Open(path); df.err != nil {
-		return df.err
+	if f, dcm.err = os.Open(path); dcm.err != nil {
+		return dcm.err
 	}
 	defer f.Close()
-	if df.err = df.FromReader(f); df.err != nil {
-		return df.err
+	if dcm.err = dcm.FromReader(f); dcm.err != nil {
+		return dcm.err
 	}
 	return nil
 }

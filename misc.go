@@ -279,7 +279,7 @@ func Fatalf(format string, v ...interface{}) {
 		} else {
 			fatallog.Output(2, fmt.Sprintf(format, v...))
 		}
-		debug.PrintStack()
+		fatallog.Output(2, fmt.Sprintf("Stack:\n%s\n", debug.Stack()))
 	}
 	if ExitOnFatalLog {
 		os.Exit(1)
@@ -298,7 +298,7 @@ func FatalfDepth(calldepth int, format string, v ...interface{}) {
 		} else {
 			fatallog.Output(calldepth, fmt.Sprintf(format, v...))
 		}
-		debug.PrintStack()
+		fatallog.Output(calldepth, fmt.Sprintf("Stack:\n%s\n", debug.Stack()))
 	}
 	if ExitOnFatalLog {
 		os.Exit(1)
@@ -316,7 +316,7 @@ func Fatal(v ...interface{}) {
 		} else {
 			fatallog.Output(2, fmt.Sprint(v...))
 		}
-		debug.PrintStack()
+		fatallog.Output(2, fmt.Sprintf("Stack:\n%s\n", debug.Stack()))
 	}
 	if ExitOnFatalLog {
 		os.Exit(1)

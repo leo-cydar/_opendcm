@@ -1,25 +1,82 @@
-// Package opmmdcm provides methods for working with DICOM data
+// Package opendcm provides methods for working with DICOM data
 package opendcm
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
-	"io"
+	"fmt"
+	"math"
+	"reflect"
 
 	"github.com/b71729/bin"
+	"github.com/b71729/opendcm/dictionary"
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/encoding/japanese"
+	"golang.org/x/text/encoding/korean"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/encoding/unicode"
 )
 
-// Sequence Delimitation Item (FFFE,E0DD)
-var seqDelimTag = uint32(0xFFFEE0DD)
+var (
+	// Sequence Delimitation Item (FFFE,E0DD)
+	seqDelimTag = uint32(0xFFFEE0DD)
 
-// Item Delimitation Item (FFFE,E00D),
-var itemDelimTag = uint32(0xFFFEE00D)
+	// Item Delimitation Item (FFFE,E00D),
+	itemDelimTag = uint32(0xFFFEE00D)
 
-// Item (FFFE,E000)
-var itemTag = uint32(0xFFFEE000)
+	// Item (FFFE,E000)
+	itemTag = uint32(0xFFFEE000)
 
-// PixelData (7FE0,0010)
-var pixelDataTag = uint32(0x7FE00010)
+	// PixelData (7FE0,0010)
+	pixelDataTag = uint32(0x7FE00010)
+)
+
+/*
+===============================================================================
+    `CharacterSet`: Accurate Text Representation
+===============================================================================
+*/
+
+// CharacterSet provides a link between character encoding, description, and decode + encode functions.
+type CharacterSet struct {
+	Name        string
+	Description string
+	Encoding    encoding.Encoding
+}
+
+// CharacterSetMap provides a mapping between character set name, and character set characteristics.
+var CharacterSetMap = map[string]*CharacterSet{
+	"Default":         {Name: "Default", Description: "Unicode (UTF-8)", Encoding: unicode.UTF8},
+	"ISO_IR 13":       {Name: "ISO_IR 13", Description: "Japanese", Encoding: japanese.ShiftJIS},
+	"ISO_IR 100":      {Name: "ISO_IR 100", Description: "Latin alphabet No. 1", Encoding: charmap.ISO8859_1},
+	"ISO_IR 101":      {Name: "ISO_IR 101", Description: "Latin alphabet No. 2", Encoding: charmap.ISO8859_2},
+	"ISO_IR 109":      {Name: "ISO_IR 109", Description: "Latin alphabet No. 3", Encoding: charmap.ISO8859_3},
+	"ISO_IR 110":      {Name: "ISO_IR 110", Description: "Latin alphabet No. 4", Encoding: charmap.ISO8859_4},
+	"ISO_IR 126":      {Name: "ISO_IR 126", Description: "Greek", Encoding: charmap.ISO8859_7},
+	"ISO_IR 127":      {Name: "ISO_IR 127", Description: "Arabic", Encoding: charmap.ISO8859_6},
+	"ISO_IR 138":      {Name: "ISO_IR 138", Description: "Hebrew", Encoding: charmap.ISO8859_8},
+	"ISO_IR 144":      {Name: "ISO_IR 144", Description: "Cyrillic", Encoding: charmap.ISO8859_5},
+	"ISO_IR 148":      {Name: "ISO_IR 148", Description: "Latin alphabet No. 5", Encoding: charmap.ISO8859_9},
+	"ISO_IR 166":      {Name: "ISO_IR 166", Description: "Thai", Encoding: charmap.Windows874},
+	"ISO_IR 192":      {Name: "ISO_IR 192", Description: "Unicode (UTF-8)", Encoding: unicode.UTF8},
+	"ISO 2022 IR 6":   {Name: "ISO 2022 IR 6", Description: "ASCII", Encoding: unicode.UTF8},
+	"ISO 2022 IR 13":  {Name: "ISO 2022 IR 13", Description: "Japanese (Shift JIS)", Encoding: japanese.ShiftJIS},
+	"ISO 2022 IR 87":  {Name: "ISO 2022 IR 87", Description: "Japanese (Kanji)", Encoding: japanese.ISO2022JP},
+	"ISO 2022 IR 100": {Name: "ISO 2022 IR 100", Description: "Latin alphabet No. 1", Encoding: charmap.ISO8859_1},
+	"ISO 2022 IR 101": {Name: "ISO 2022 IR 101", Description: "Latin alphabet No. 2", Encoding: charmap.ISO8859_2},
+	"ISO 2022 IR 109": {Name: "ISO 2022 IR 109", Description: "Latin alphabet No. 3", Encoding: charmap.ISO8859_3},
+	"ISO 2022 IR 110": {Name: "ISO 2022 IR 110", Description: "Latin alphabet No. 4", Encoding: charmap.ISO8859_4},
+	"ISO 2022 IR 127": {Name: "ISO 2022 IR 127", Description: "Arabic", Encoding: charmap.ISO8859_6},
+	"ISO 2022 IR 138": {Name: "ISO 2022 IR 138", Description: "Hebrew", Encoding: charmap.ISO8859_8},
+	"ISO 2022 IR 144": {Name: "ISO 2022 IR 144", Description: "Cyrillic", Encoding: charmap.ISO8859_5},
+	"ISO 2022 IR 148": {Name: "ISO 2022 IR 148", Description: "Latin alphabet No. 5", Encoding: charmap.ISO8859_9},
+	"ISO 2022 IR 149": {Name: "ISO 2022 IR 149", Description: "Korean", Encoding: korean.EUCKR}, // TODO: verify
+	"ISO 2022 IR 159": {Name: "ISO 2022 IR 159", Description: "Japanese (Supplementary Kanji)", Encoding: japanese.ISO2022JP},
+	"ISO 2022 IR 166": {Name: "ISO 2022 IR 166", Description: "Thai", Encoding: charmap.Windows874},
+	"GB18030":         {Name: "GB18030", Description: "Chinese (Simplified)", Encoding: simplifiedchinese.GB18030},
+}
 
 /*
 ===============================================================================
@@ -41,7 +98,7 @@ func (ds *DataSet) GetElement(tag uint32, dst *Element) bool {
 	return false
 }
 
-// AddElement adds Element `e`
+// AddElement adds Element `e` to the data set.
 func (ds *DataSet) AddElement(e Element) {
 	(*ds)[e.GetTag()] = e
 }
@@ -70,6 +127,25 @@ func (ds *DataSet) GetImplementationVersionName(dst *string) bool {
 	return true
 }
 
+// GetCharacterSet returns either the character set as defined in (0008,0005),
+// or ISO_IR 100 (default character set)
+func (ds *DataSet) GetCharacterSet() (cs *CharacterSet) {
+	// initialise new element to hold character set value
+	e := NewElement()
+	var found bool
+	// check whether element exists in the dataset map
+	if ds.GetElement(0x00080005, &e) {
+		sa := []string{}
+		e.GetValue(&sa)
+		if cs, found = CharacterSetMap[sa[len(sa)-1]]; found {
+			return
+		}
+	}
+
+	cs, _ = CharacterSetMap["Default"]
+	return
+}
+
 // GetElements returns all elements in the data set as a flat slice.
 //
 // Note: this is quite an expensive operation and may incur many allocations
@@ -82,6 +158,14 @@ func (ds *DataSet) GetElements() []Element {
 	}
 	// and return said array to the callee
 	return elements
+}
+
+// EachElement calls `fn` on each element within the dataset
+func (ds *DataSet) EachElement(onElement func(e *Element)) {
+	for _, e := range *ds {
+		onElement(&e)
+		(*ds)[e.GetTag()] = e
+	}
 }
 
 // NewDataSet returns a fresh DataSet
@@ -99,7 +183,7 @@ func NewDataSet() DataSet {
 // as per http://dicom.nema.org/dicom/2013/output/chtml/part05/sect_7.5.html
 type Item struct {
 	dataset  DataSet
-	unparsed []byte
+	fragment []byte
 }
 
 // NewItem returns a fresh Item with a blank data set.
@@ -109,13 +193,16 @@ func NewItem() Item {
 	}
 }
 
-// GetUnparsed returns the "unparsed" data within an Item.
+// GetFragment returns the "fragment" data within an Item.
 //
-// An item may be unparsed if for instance its source VR was not SQ.
-// Main example being PixelData: This could for instance be of OW VR,
-// but have undefined length, and as such, have "Items".
-func (i *Item) GetUnparsed() []byte {
-	return i.unparsed
+// An item will have fragment data if, when reading the source data,
+// "shouldParseEmbeddedElements" returned false.
+//
+// The Dicom spec could be clearer of _when_ items will have
+// fragments, rather than elements.
+// As far as I can see, the only case in practice will be with the PixelData tag.
+func (i *Item) GetFragment() []byte {
+	return i.fragment
 }
 
 /*
@@ -124,24 +211,49 @@ func (i *Item) GetUnparsed() []byte {
 ===============================================================================
 */
 
+// splitCharacterStringVM splits `buffer` using "\" as delimiter.
+func splitCharacterStringVM(buffer []byte) [][]byte {
+	return bytes.Split(buffer, []byte(`\`))
+}
+
+// splitBinaryVM splits `buffer` at `nBytesEach`.
+func splitBinaryVM(buffer []byte, nBytesEach int) (splitted [][]byte) {
+	pos := 0
+	for len(buffer) >= pos+nBytesEach {
+		splitted = append(splitted, buffer[pos:(pos+nBytesEach)])
+		pos += nBytesEach
+	}
+	return
+}
+
 // Element represents a Data Element,
 // as per http://dicom.nema.org/dicom/2013/output/chtml/part05/chapter_7.html#sect_7.1
 type Element struct {
-	tag     uint32
-	vr      string
-	data    []byte
-	datalen uint32
-	items   []Item
+	dictEntry      *dictionary.DictEntry
+	data           []byte
+	isLittleEndian bool
+	datalen        uint32
+	items          []Item
 }
 
 // GetTag returns the Element's "Tag" component
 func (e *Element) GetTag() uint32 {
-	return e.tag
+	return e.dictEntry.Tag
 }
 
 // GetVR returns the Element's "VR" component
 func (e *Element) GetVR() string {
-	return e.vr
+	return e.dictEntry.VR
+}
+
+// GetVM returns the Element's "VM" component
+func (e *Element) GetVM() string {
+	return e.dictEntry.VM
+}
+
+// GetName returns the Element's "Name" component
+func (e *Element) GetName() string {
+	return e.dictEntry.Name
 }
 
 // HasItems returns whether the element contains nested items
@@ -154,6 +266,134 @@ func (e *Element) GetItems() []Item {
 	return e.items
 }
 
+func (e *Element) supportsType(typ interface{}) bool {
+	/*
+			TODO:
+			"OD", "OF", "OW",
+		    "SQ",
+	*/
+	// in the case that the VR is unknown, take the less disruptive choice: respond with true
+	// in practice, we don't know whether it supports, but we need a way of allowing the value to be retrieved.
+	if e.GetVR() == "UN" {
+		return true
+	}
+	switch typ.(type) {
+	case string, *string, []string, *[]string:
+		switch e.GetVR() {
+		case "SH", "LO", "ST", "PN", "LT", "UT",
+			"IS", "DS", "TM", "DA", "DT", "UI", "CS", "AS", "AE": // These shouldnt be parsed using charset btw
+			return true
+		}
+	case float32, *float32, []float32, *[]float32:
+		if e.GetVR() == "FL" {
+			return true
+		}
+	case float64, *float64, []float64, *[]float64:
+		if e.GetVR() == "FD" {
+			return true
+		}
+	case int16, *int16, []int16, *[]int16:
+		if e.GetVR() == "SS" {
+			return true
+		}
+	case int32, *int32, []int32, *[]int32:
+		if e.GetVR() == "SL" {
+			return true
+		}
+	case uint16, *uint16, []uint16, *[]uint16:
+		if e.GetVR() == "US" {
+			return true
+		}
+	case uint32, *uint32, []uint32, *[]uint32:
+		if e.GetVR() == "UL" || e.GetVR() == "AT" {
+			return true
+		}
+	case []byte, *[]byte:
+		// every VR can be expressed as a sequence of bytes
+		return true
+	}
+	return false
+}
+
+// GetValue writes the element's "value" component to "dst".
+// "dst" should be writable (pointer type)
+func (e *Element) GetValue(dst interface{}) error {
+	// check whether the VR supports expression as target type
+	if !e.supportsType(dst) {
+		return fmt.Errorf("GetValue(%s): value of %s cannot be expressed as a %s", reflect.TypeOf(dst), e.dictEntry, reflect.TypeOf(dst))
+	}
+	switch typedDst := dst.(type) {
+	case *string:
+		// if VR is textual just return UTF8 string (when a dicom is parsed, using `FromReader`, all text elements
+		// are re-encoded into UTF-8 as before the function returns.)
+		Debugf("String: %s", e.GetDataBytes())
+		*typedDst = string(e.GetDataBytes())
+	case *[]string:
+		for _, v := range splitCharacterStringVM(e.GetDataBytes()) {
+			*typedDst = append(*typedDst, string(v))
+		}
+	case *[]byte:
+		*typedDst = e.GetDataBytes()
+	case *[]float32:
+		for _, v := range splitBinaryVM(e.GetDataBytes(), 4) {
+			if e.isLittleEndian {
+				*typedDst = append(*typedDst, math.Float32frombits(binary.LittleEndian.Uint32(v)))
+			} else {
+				*typedDst = append(*typedDst, math.Float32frombits(binary.BigEndian.Uint32(v)))
+			}
+		}
+	case *float32:
+		*typedDst = math.Float32frombits(binary.LittleEndian.Uint32(e.GetDataBytes()[:4]))
+	case *[]float64:
+		for _, v := range splitBinaryVM(e.GetDataBytes(), 8) {
+			if e.isLittleEndian {
+				*typedDst = append(*typedDst, math.Float64frombits(binary.LittleEndian.Uint64(v)))
+			} else {
+				*typedDst = append(*typedDst, math.Float64frombits(binary.BigEndian.Uint64(v)))
+			}
+		}
+	case *float64:
+		*typedDst = math.Float64frombits(binary.LittleEndian.Uint64(e.GetDataBytes()[:8]))
+	case *[]int16:
+		for _, v := range splitBinaryVM(e.GetDataBytes(), 2) {
+			if e.isLittleEndian {
+				*typedDst = append(*typedDst, int16(binary.LittleEndian.Uint16(v)))
+			} else {
+				*typedDst = append(*typedDst, int16(binary.BigEndian.Uint16(v)))
+			}
+		}
+	case *int16:
+		if e.isLittleEndian {
+			*typedDst = int16(binary.LittleEndian.Uint16(e.GetDataBytes()))
+		} else {
+			*typedDst = int16(binary.BigEndian.Uint16(e.GetDataBytes()))
+		}
+	case *[]int32:
+		for _, v := range splitBinaryVM(e.GetDataBytes(), 4) {
+			if e.isLittleEndian {
+				*typedDst = append(*typedDst, int32(binary.LittleEndian.Uint32(v)))
+			} else {
+				*typedDst = append(*typedDst, int32(binary.BigEndian.Uint32(v)))
+			}
+		}
+	case *int32:
+		if e.isLittleEndian {
+			*typedDst = int32(binary.LittleEndian.Uint32(e.GetDataBytes()))
+		} else {
+			*typedDst = int32(binary.BigEndian.Uint32(e.GetDataBytes()))
+		}
+	// if not writable type (pointer), return error
+	case bool, string,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, uintptr,
+		float32, float64, complex64, complex128:
+		return fmt.Errorf("GetValue(%s): destination is not writable", reflect.TypeOf(dst))
+	default:
+		return fmt.Errorf(`writing to type "%v" is not yet implemented`, reflect.TypeOf(dst))
+	}
+	return nil
+}
+
 // GetDataBytes will likely be removed / modified.
 func (e *Element) GetDataBytes() []byte {
 	return e.data
@@ -161,7 +401,27 @@ func (e *Element) GetDataBytes() []byte {
 
 // NewElement returns a fresh Element
 func NewElement() Element {
-	return Element{}
+	// by default, it will be Little Endian
+	e := Element{isLittleEndian: true}
+	// dictionary entry should be initialised to provide deterministic behaviour
+	// in the case that the tag hasn't been assigned.
+	// a tag cannot be "FFFFFFFF" according to the dicom spec, so this should be easy to detect.
+	e.dictEntry = &dictionary.DictEntry{
+		Tag:       0xFFFFFFFF,
+		Name:      "UninitialisedMemory",
+		NameHuman: "UninitialisedMemory",
+		VR:        "UN",
+		VM:        "1",
+		Retired:   false}
+	return e
+}
+
+// NewElementWithTag returns a fresh Element with
+// its VR, VM, Name and NameHuman pre-looked up according to "t".
+func NewElementWithTag(t uint32) Element {
+	e := NewElement()
+	e.dictEntry, _ = lookupTag(t)
+	return e
 }
 
 /*
@@ -170,11 +430,33 @@ func NewElement() Element {
 ===============================================================================
 */
 
+// shouldReadEmbeddedElements is used to determine whether given element "e"
+// should, theoretically, contain embedded elements. (if false, it indicates
+// that the element will contain "data fragments")
+func shouldReadEmbeddedElements(e Element) bool {
+	// if tag is PixelData, return false
+	return e.GetTag() != pixelDataTag
+	// else return true
+}
+
+// lookupTag searches for the corresponding `dictionary.DicomDictionary` entry for the given tag uint32
+func lookupTag(t uint32) (entry *dictionary.DictEntry, found bool) {
+	// attempt to lookup tag in the dictionary
+	entry, found = dictionary.DicomDictionary[t]
+	// if not found, default to sensible values
+	if !found {
+		name := fmt.Sprintf("Unknown(%04X,%04X)", uint16(t>>16), uint16(t))
+		entry = &dictionary.DictEntry{Tag: t, Name: name, NameHuman: name, VR: "UN", VM: "1", Retired: false}
+	}
+	return
+}
+
 // ElementReader extends `bin.Reader` to export methods to assist in
 // decoding DICOM Elements, i.e. "ReadElement".
 type ElementReader struct {
 	br       bin.Reader
 	implicit bool
+	charSet  *CharacterSet
 	tmpBuffers
 }
 
@@ -220,18 +502,12 @@ func (elr *ElementReader) readElementVR(dst *Element) error {
 	if elr.err = elr.br.ReadBytes(elr._1kb[:2]); elr.err != nil {
 		return elr.err
 	}
-	// and write vr into destination element
-	dst.vr = string(elr._1kb[:2])
+	// only overwrite the existing dictionary entry's VR if we have UN
+	// and source has something else (has added value)
+	if (dst.GetVR() == "UN" || dst.GetVR() == "") && string(elr._1kb[:2]) != "UN" {
+		dst.dictEntry.VR = string(elr._1kb[:2])
+	}
 	return nil
-}
-
-// readElementTag attempts to read+decode the "Tag" component of an Element
-// into `dst`.
-//
-// Should be careful calling this, as it assumes specific Reader offset.
-func (elr *ElementReader) readElementTag(dst *Element) error {
-	// return tag written directly into destination element
-	return elr.readTag(&dst.tag)
 }
 
 // readElementLength attempts to read/decode the "Length" component of an Element
@@ -268,36 +544,46 @@ func (elr *ElementReader) readElementLength(dst *Element) error {
 	return nil
 }
 
-func (elr *ElementReader) tagFromBytes(src []byte) uint32 {
+// tagFromBytes parses a dicom tag from a block of four bytes.
+// If "src" is not of length four, an error will be returned.
+func (elr *ElementReader) tagFromBytes(src []byte, dst *uint32) error {
+	if len(src) != 4 {
+		return errors.New("tagFromBytes requires four bytes")
+	}
 	if elr.IsLittleEndian() {
-		return uint32(src[2]) |
+		*dst = uint32(src[2]) |
 			uint32(src[3])<<8 |
 			uint32(src[0])<<16 |
 			uint32(src[1])<<24
+	} else {
+		*dst = uint32(src[3]) |
+			uint32(src[2])<<8 |
+			uint32(src[1])<<16 |
+			uint32(src[0])<<24
 	}
-	return uint32(src[3]) |
-		uint32(src[2])<<8 |
-		uint32(src[1])<<16 |
-		uint32(src[0])<<24
+	return nil
 }
 
+// hasReachedTag returns whether the underlying reader has reached "tag".
+// "tag" should be a dicom tag in uin32 format.
+// In determining this, it does not forward the reader.
 func (elr *ElementReader) hasReachedTag(tag uint32) (bool, error) {
 	// peek 4 bytes
 	if elr.err = elr.br.Peek(elr._1kb[:4]); elr.err != nil {
 		return false, elr.err
 	}
 	// decode tag from those four bytes
-	elr.ui32 = elr.tagFromBytes(elr._1kb[:4])
+	if elr.err = elr.tagFromBytes(elr._1kb[:4], &elr.ui32); elr.err != nil {
+		return false, elr.err
+	}
 	// return tag == "input_tag"
 	return (elr.ui32 == tag), nil
 }
 
-func shouldReadEmbeddedElements(e Element) bool {
-	// if tag is PixelData, return false
-	return e.GetTag() != pixelDataTag
-	// else return true
-}
-
+// readItemUndefLength attempts to read the "data" component of an item that is of
+// "undefined length" from the reader.
+// "readEmbeddedElements" specifies whether the method should parse embedded datas as "elements",
+// or "data fragments" (i.e. as would be the case with PixelData).
 func (elr *ElementReader) readItemUndefLength(readEmbeddedElements bool, dst *Item) error {
 	// for
 	for {
@@ -312,7 +598,10 @@ func (elr *ElementReader) readItemUndefLength(readEmbeddedElements bool, dst *It
 		if readEmbeddedElements {
 			// initialise empty element
 			e := NewElement()
-			// read element("dest")
+			if !elr.IsLittleEndian() {
+				e.isLittleEndian = false
+			}
+			// read element(empty_element)
 			if elr.err = elr.ReadElement(&e); elr.err != nil {
 				return elr.err
 			}
@@ -320,10 +609,10 @@ func (elr *ElementReader) readItemUndefLength(readEmbeddedElements bool, dst *It
 			dst.dataset.AddElement(e)
 			continue
 		}
-		// we are not reading embedded elemebts, instead extend "unparsed" by four bytes
-		dst.unparsed = append(dst.unparsed, make([]byte, 4)...)
+		// we are not reading embedded elemebts, instead extend "fragment" by four bytes
+		dst.fragment = append(dst.fragment, make([]byte, 4)...)
 		// and read from the stream
-		if elr.err = elr.br.ReadBytes(dst.unparsed[len(dst.unparsed)-4:]); elr.err != nil {
+		if elr.err = elr.br.ReadBytes(dst.fragment[len(dst.fragment)-4:]); elr.err != nil {
 			return elr.err
 		}
 	}
@@ -332,6 +621,10 @@ func (elr *ElementReader) readItemUndefLength(readEmbeddedElements bool, dst *It
 	// finished
 }
 
+// readItem attempts to read an item from the reader.
+// "readEmbeddedElements" specifies whether the method should parse embedded datas as "elements",
+// or "data fragments" (i.e. as would be the case with PixelData).
+// This method handles both undefined length and defined length items.
 func (elr *ElementReader) readItem(readEmbeddedElements bool, dst *Item) error {
 	// read item-tag
 	if elr.err = elr.readTag(&elr.ui32); elr.err != nil {
@@ -376,6 +669,9 @@ func (elr *ElementReader) readItem(readEmbeddedElements bool, dst *Item) error {
 		for elr.br.GetPosition() < endPos {
 			// 	initialise empty element
 			e := NewElement()
+			if !elr.IsLittleEndian() {
+				e.isLittleEndian = false
+			}
 			// 	read element(empty element)
 			if elr.err = elr.ReadElement(&e); elr.err != nil {
 				return elr.err
@@ -388,12 +684,14 @@ func (elr *ElementReader) readItem(readEmbeddedElements bool, dst *Item) error {
 	}
 
 	// # not reading elements - read bytes and store
-	// initialise "dest".unparsed to length of element
-	dst.unparsed = make([]byte, elr.ui32)
-	// "dest".unparsed <- read len X bytes
-	return elr.br.ReadBytes(dst.unparsed)
+	// initialise "dest".fragment to length of element
+	dst.fragment = make([]byte, elr.ui32)
+	// "dest".fragment <- read len X bytes
+	return elr.br.ReadBytes(dst.fragment)
 }
 
+// readElementDataUndefLength attempts to read the "data" component of
+// an element that is of "undefined length" from the reader.
 func (elr *ElementReader) readElementDataUndefLength(dst *Element) error {
 	// for
 	for {
@@ -426,6 +724,11 @@ func (elr *ElementReader) readElementDataUndefLength(dst *Element) error {
 // Should be careful calling this, as it assumes specific Reader offset.
 func (elr *ElementReader) readElementData(dst *Element) error {
 
+	// is "dst" of zero length?
+	if dst.datalen == 0 {
+		return nil
+	}
+
 	// is "dest" of undef. length?
 	if dst.datalen == 0xFFFFFFFF {
 		// read_element_data_undef_length("dest")
@@ -450,8 +753,26 @@ func (elr *ElementReader) readElementData(dst *Element) error {
 	// otherwise, its "defined length, non-SQ", read as arbitrary bytes
 	// initialise dest to length of element
 	dst.data = make([]byte, dst.datalen)
+
 	// "dest" <- read len X bytes
-	return elr.br.ReadBytes(dst.data)
+	if elr.err = elr.br.ReadBytes(dst.data); elr.err != nil {
+		return elr.err
+	}
+
+	padchars := []byte{0x00, 0x20}
+	switch dst.GetVR() {
+	case "UI", "OB", "CS", "DS", "IS", "AE", "AS", "DA", "DT", "LO", "LT", "OD", "OF", "OW", "PN", "SH", "ST", "TM", "UT":
+		for _, chr := range padchars {
+			if dst.data[len(dst.data)-1] == chr {
+				dst.data = dst.data[:len(dst.data)-1]
+				dst.datalen--
+			} else if dst.data[0] == chr { // NOTE: assumes padding will only take place on one side. Should be fine.
+				dst.data = dst.data[1:]
+				dst.datalen--
+			}
+		}
+	}
+	return nil
 }
 
 // ReadElement attempts to completely read an element into `dst`.
@@ -459,9 +780,11 @@ func (elr *ElementReader) readElementData(dst *Element) error {
 // All types of elements are expected to be compatible.
 func (elr *ElementReader) ReadElement(dst *Element) error {
 	// read tag
-	if elr.err = elr.readElementTag(dst); elr.err != nil {
+	if elr.err = elr.readTag(&elr.ui32); elr.err != nil {
 		return elr.err
 	}
+	// set element.dictentry to an entry in dictionary
+	dst.dictEntry, elr._bool = lookupTag(elr.ui32)
 
 	// read vr
 	if elr.err = elr.readElementVR(dst); elr.err != nil {
@@ -477,15 +800,14 @@ func (elr *ElementReader) ReadElement(dst *Element) error {
 	return elr.readElementData(dst)
 }
 
-// readTagattempts to read/decode a dicom "Tag" from the reader into `dst`.
+// readTag attempts to read/decode a dicom "Tag" from the reader into `dst`.
 //
 // Should be careful calling this, as it assumes specific Reader offset.
 func (elr *ElementReader) readTag(dst *uint32) error {
 	if elr.err = elr.br.ReadBytes(elr._1kb[:4]); elr.err != nil {
 		return elr.err
 	}
-	*dst = elr.tagFromBytes(elr._1kb[:4])
-	return nil
+	return elr.tagFromBytes(elr._1kb[:4], dst)
 }
 
 // determineEncoding attempts to determine the current encoding
@@ -517,7 +839,7 @@ func (elr *ElementReader) determineEncoding(buf []byte) error {
 	}
 	// encoding should have been determined by this stage
 	elr.SetImplicitVR(elr._bool)
-	Debugf("Determined Encoding: ImplicitVR: %v, LittleEndian: %v", elr.IsImplicitVR(), elr.IsLittleEndian())
+	//Debugf("Determined Encoding: ImplicitVR: %v, LittleEndian: %v", elr.IsImplicitVR(), elr.IsLittleEndian())
 	return nil
 }
 
@@ -535,136 +857,4 @@ func NewElementReader(source bin.Reader) (er ElementReader) {
 	er.SetImplicitVR(true)
 	er.SetLittleEndian(true)
 	return er
-}
-
-/*
-===============================================================================
-    ElementWriter
-===============================================================================
-*/
-
-// ElementWriter extends `bin.Writer` to export methods to assist in
-// encoding DICOM Elements, i.e. "WriteElement".
-type ElementWriter struct {
-	bw       bin.Writer
-	implicit bool
-	tmpBuffers
-}
-
-// NewElementWriter returns a fresh ElementWriter set up to write to `dest`.
-//
-// For futureproofing, it is suggested to use these constructors rather than
-// manually creating an instance (i.e. `elw := ElementWriter{}`)
-func NewElementWriter(dest io.Writer) ElementWriter {
-	// create an instance of the element writer with the destination
-	// wrapped in a binary writer
-	ew := ElementWriter{
-		bw: bin.NewWriter(dest, binary.LittleEndian),
-	}
-	// default to "Implicit VR Little Endian: Default Transfer Syntax for DICOM"
-	ew.SetImplicitVR(true)
-	ew.SetLittleEndian(true)
-	return ew
-}
-
-// IsLittleEndian returns whether this ElementWriter is set to encode
-// data according to Little Endian byte ordering.
-func (elw *ElementWriter) IsLittleEndian() bool {
-	return elw.bw.GetByteOrder() == binary.LittleEndian
-}
-
-// SetLittleEndian setswhether this ElementWriter should encode
-// data according to Little Endian byte ordering.
-func (elw *ElementWriter) SetLittleEndian(isLittleEndian bool) {
-	// set using the "encoding/binary" package
-	if isLittleEndian {
-		elw.bw.SetByteOrder(binary.LittleEndian)
-	} else {
-		elw.bw.SetByteOrder(binary.BigEndian)
-	}
-}
-
-// IsImplicitVR returns whether this ElementWriter is set to encode
-// data according to the VR component being implicitly defined
-func (elw *ElementWriter) IsImplicitVR() bool {
-	return elw.implicit
-}
-
-// SetImplicitVR returns whether this ElementWriter should encode
-// data according to the VR component being implicitly defined
-func (elw *ElementWriter) SetImplicitVR(isImplicitVR bool) {
-	elw.implicit = isImplicitVR
-}
-
-// writeElementTag attempts to write the "Tag" component of `src`
-//
-// Should be careful calling this, as it assumes specific Writer offset.
-func (elw *ElementWriter) writeElementTag(src Element) error {
-	// write the upper component
-	if elw.err = elw.bw.WriteUint16(uint16(src.GetTag() >> 16)); elw.err != nil {
-		return elw.err
-	}
-	// then the lower component
-	return elw.bw.WriteUint16(uint16(src.GetTag()))
-}
-
-// writeElementVR attempts to write the "VR" component of `src`
-//
-// Should be careful calling this, as it assumes specific Writer offset.
-func (elw *ElementWriter) writeElementVR(src Element) error {
-	// if Implicit VR, nothing needs to be written
-	if elw.IsImplicitVR() {
-		return nil
-	}
-	elw._1kb[0] = src.GetVR()[0]
-	elw._1kb[1] = src.GetVR()[1]
-	return elw.bw.WriteBytes(elw._1kb[:2])
-
-}
-
-// writeElementLength attempts to write the "Length" component of `src`
-//
-// Should be careful calling this, as it assumes specific Writer offset.
-func (elw *ElementWriter) writeElementLength(src Element) error {
-	if elw.IsImplicitVR() {
-		// ImplicitVR: all length definitions are 32 bits
-		return elw.bw.WriteUint32(src.datalen)
-	}
-	// Is it a special VR?
-	switch src.GetVR() {
-	case "OB", "OW", "SQ", "UN", "UT":
-		// write 2 empty bytes
-		if elw.err = elw.bw.ZeroFill(2); elw.err != nil {
-			return elw.err
-		}
-		// then length is 32 bits
-		return elw.bw.WriteUint32(src.datalen)
-	default:
-		return elw.bw.WriteUint16(uint16(src.datalen))
-	}
-}
-
-// WriteElement attempts to completely write `src`
-//
-// All types of elements are expected to be compatible.
-func (elw *ElementWriter) WriteElement(src Element) error {
-	// write tag
-	if elw.err = elw.writeElementTag(src); elw.err != nil {
-		return elw.err
-	}
-
-	// write vr
-	if elw.err = elw.writeElementVR(src); elw.err != nil {
-		return elw.err
-	}
-
-	// write length
-	if elw.err = elw.writeElementLength(src); elw.err != nil {
-		return elw.err
-	}
-
-	// write contents
-	// TODO
-	//return elw.writeElementData(src)
-	return nil
 }
