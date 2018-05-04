@@ -115,9 +115,9 @@ func boolFromEnvDefault(key string, def bool) (val bool) {
 
 var config Config
 
-// GetConfig returns the application configuration.
-// Will set from environment if not already set.
-func GetConfig() Config {
+// initialiseConfig initialises the applications configuraiton.
+// Will set config from environment if not already set.
+func initialiseConfig() {
 	if !config._set {
 		config.OpenFileLimit = intFromEnvDefault("OPENDCM_OPENFILELIMIT", 64)
 		config.StrictMode = boolFromEnvDefault("OPENDCM_STRICTMODE", false)
@@ -134,7 +134,11 @@ func GetConfig() Config {
 		}
 		config._set = true
 	}
-	return config
+}
+
+// hook for package initialisation.
+func init() {
+	initialiseConfig()
 }
 
 // OverrideConfig overrides the configuration parsed from environment with the one provided
@@ -403,7 +407,7 @@ func SetLoggingLevel(level string) {
 
 // ConcurrentlyWalkDir recursively traverses a directory and calls `onFile` for each found file inside a goroutine.
 func ConcurrentlyWalkDir(dirPath string, onFile func(file string)) error {
-	guard := make(chan bool, GetConfig().OpenFileLimit) // limits number of concurrently open files
+	guard := make(chan bool, config.OpenFileLimit) // limits number of concurrently open files
 	var files []string
 	wg := sync.WaitGroup{}
 

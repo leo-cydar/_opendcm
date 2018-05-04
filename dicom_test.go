@@ -22,7 +22,7 @@ import (
 
 func TestGetPreamble(t *testing.T) {
 	t.Parallel()
-	dcm := NewDicom()
+	dcm := newDicom()
 	assert.Equal(t, [128]byte{}, dcm.GetPreamble())
 
 	// populate preamble and retry
@@ -33,33 +33,16 @@ func TestGetPreamble(t *testing.T) {
 	assert.Equal(t, preamble, dcm.GetPreamble())
 }
 
-func TestGetDataSet(t *testing.T) {
+func TestNewDicom(t *testing.T) {
 	t.Parallel()
-	dcm := NewDicom()
-	// empty dataset
-	ds := dcm.GetDataSet()
-	assert.Equal(t, 0, ds.Len())
-
-	// couple of entries
-	e := NewElement()
-	e.dictEntry, _ = lookupTag(0x0072006C)
-	dcm.dataset.AddElement(e)
-	e.dictEntry, _ = lookupTag(0x00720064)
-	dcm.dataset.AddElement(e)
-	ds = dcm.GetDataSet()
-	assert.Equal(t, 2, ds.Len())
-}
-
-func TestNewDicomFile(t *testing.T) {
-	t.Parallel()
-	assert.IsType(t, Dicom{}, NewDicom())
+	assert.IsType(t, Dicom{}, newDicom())
 }
 
 func TestAttemptReadPreamble(t *testing.T) {
 	t.Parallel()
 
 	// should return true
-	dcm := NewDicom()
+	dcm := newDicom()
 	f, err := os.Open(filepath.Join("testdata", "synthetic", "VRTest.dcm"))
 	assert.NoError(t, err)
 	r := bin.NewReader(f, binary.LittleEndian)
@@ -69,7 +52,7 @@ func TestAttemptReadPreamble(t *testing.T) {
 	assert.Equal(t, [128]byte{}, dcm.preamble)
 
 	// should return false
-	dcm = NewDicom()
+	dcm = newDicom()
 	f, err = os.Open(filepath.Join("testdata", "synthetic", "MissingPreambleMagic.dcm"))
 	assert.NoError(t, err)
 	r = bin.NewReader(f, binary.LittleEndian)
@@ -82,7 +65,7 @@ func TestAttemptReadPreambleError(t *testing.T) {
 	t.Parallel()
 
 	// not enough bytes
-	dcm := NewDicom()
+	dcm := newDicom()
 	r := bin.NewReaderBytes([]byte{}, binary.LittleEndian)
 	b, err := dcm.attemptReadPreamble(&r)
 	assert.Error(t, err)
@@ -94,9 +77,9 @@ func TestFromReader(t *testing.T) {
 	// from file reader
 	f, err := os.Open(filepath.Join("testdata", "synthetic", "MissingPreambleMagic.dcm"))
 	assert.NoError(t, err)
-	dcm := NewDicom()
-	assert.NoError(t, dcm.FromReader(f))
-	assert.Equal(t, 8, dcm.GetDataSet().Len())
+	dcm, err := FromReader(f)
+	assert.NoError(t, err)
+	assert.Equal(t, 8, dcm.Len())
 	f.Close()
 
 	// from byte reader
@@ -110,9 +93,9 @@ func TestFromReader(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, len(buf), nread)
 	r := bytes.NewReader(buf)
-	dcm = NewDicom()
-	assert.NoError(t, dcm.FromReader(r))
-	assert.Equal(t, 8, dcm.GetDataSet().Len())
+	dcm, err = FromReader(r)
+	assert.NoError(t, err)
+	assert.Equal(t, 8, dcm.Len())
 	f.Close()
 }
 
@@ -122,8 +105,8 @@ func TestFromReaderError(t *testing.T) {
 	// dicom bytes that are not enough to peek the preamble component
 	notEnoughBytes := make([]byte, 100)
 	r := bytes.NewReader(notEnoughBytes)
-	dcm := NewDicom()
-	assert.Error(t, dcm.FromReader(r))
+	_, err := FromReader(r)
+	assert.Error(t, err)
 
 	// dicom bytes that make up a valid preamble component
 	// but then abruptly ends; should not return error, but still is
@@ -134,47 +117,52 @@ func TestFromReaderError(t *testing.T) {
 	preambleNoElements[130] = byte('C')
 	preambleNoElements[131] = byte('M')
 	r = bytes.NewReader(preambleNoElements)
-	assert.NoError(t, dcm.FromReader(r))
+	_, err = FromReader(r)
+	assert.NoError(t, err)
 
 	// append one byte, this should cause subsequent element parsing
 	// to fail
 	preambleNoElements = append(preambleNoElements, byte(0x00))
 	r = bytes.NewReader(preambleNoElements)
-	assert.Error(t, dcm.FromReader(r))
+	_, err = FromReader(r)
+	assert.Error(t, err)
 
 	// append another byte, should not be an explicit error
 	preambleNoElements = append(preambleNoElements, byte(0x00))
 	r = bytes.NewReader(preambleNoElements)
-	assert.NoError(t, dcm.FromReader(r))
+	_, err = FromReader(r)
+	assert.NoError(t, err)
 
 	// append another bytes, this should cause subsequent element
 	// parsing to fail
 	preambleNoElements = append(preambleNoElements, byte(0x00))
 	r = bytes.NewReader(preambleNoElements)
-	assert.Error(t, dcm.FromReader(r))
+	_, err = FromReader(r)
+	assert.Error(t, err)
 
 	// append another couple bytes, this also should cause subsequent element
 	// parsing to fail
 	preambleNoElements = append(preambleNoElements, make([]byte, 2)...)
 	r = bytes.NewReader(preambleNoElements)
-	assert.Error(t, dcm.FromReader(r))
+	_, err = FromReader(r)
+	assert.Error(t, err)
 }
 
 func TestFromFile(t *testing.T) {
 	t.Parallel()
-	dcm := NewDicom()
-	assert.NoError(t, dcm.FromFile(filepath.Join("testdata", "synthetic", "VRTest.dcm")))
-	assert.Equal(t, 27, dcm.GetDataSet().Len())
+	dcm, err := FromFile(filepath.Join("testdata", "synthetic", "VRTest.dcm"))
+	assert.NoError(t, err)
+	assert.Equal(t, 27, dcm.Len())
 }
 
 func TestFromFileError(t *testing.T) {
 	t.Parallel()
-	dcm := NewDicom()
 	// try to parse dicom from
 	// 1: file that does not exist
 	// 2: file that exists, but is not a dicom
 	for _, path := range []string{"__.__0000", "dicom_test.go"} {
-		assert.Error(t, dcm.FromFile(path))
+		_, err := FromFile(path)
+		assert.Error(t, err)
 	}
 }
 
@@ -185,12 +173,12 @@ func TestFromFileNoPermission(t *testing.T) {
 		t.Skipf("skip (windows)")
 	}
 	t.Parallel()
-	dcm := NewDicom()
 	f, err := ioutil.TempFile("", "")
 	assert.NoError(t, err)
 	assert.NoError(t, f.Chmod(0333))
 	defer os.Remove(f.Name())
-	assert.Error(t, dcm.FromFile(f.Name()))
+	_, err = FromFile(f.Name())
+	assert.Error(t, err)
 }
 
 func TestCharsetDecode(t *testing.T) {
@@ -262,21 +250,20 @@ func TestCharsetDecode(t *testing.T) {
 			expectedPatientName:  "Éncø∂é∂ √ålüÉ",
 		},
 		{
-			filename:             "GB18030.dcm", // TODO
+			filename:             "GB18030.dcm",
 			expectedCharacterSet: "GB18030",
 			expectedPatientName:  "编码值",
 		},
 	} {
-		dcm := NewDicom()
-		assert.NoError(t, dcm.FromFile(filepath.Join("testdata", "synthetic", testCase.filename)))
-		assert.Equal(t, testCase.expectedCharacterSet, dcm.GetDataSet().GetCharacterSet().Name)
+		dcm, err := FromFile(filepath.Join("testdata", "synthetic", testCase.filename))
+		assert.NoError(t, err)
+		assert.Equal(t, testCase.expectedCharacterSet, dcm.GetCharacterSet().Name)
 		name := ""
 		var e = NewElement()
-		assert.True(t, dcm.GetDataSet().GetElement(0x00100010, &e))
+		assert.True(t, dcm.GetElement(0x00100010, &e))
 		assert.NoError(t, e.GetValue(&name))
 		assert.Equal(t, testCase.expectedPatientName, name)
 	}
-
 }
 
 func BenchmarkFromReader(b *testing.B) {
@@ -300,10 +287,9 @@ func BenchmarkFromReader(b *testing.B) {
 		b.Fatal(nread)
 	}
 	r := bytes.NewReader(buf)
-	dcm := NewDicom()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		dcm.FromReader(r)
+		FromReader(r)
 		r.Reset(buf)
 	}
 }

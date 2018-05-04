@@ -88,7 +88,7 @@ var CharacterSetMap = map[string]*CharacterSet{
 // as per: http://dicom.nema.org/dicom/2013/output/chtml/part10/sect_7.2.html
 type DataSet map[uint32]Element
 
-// GetElement attempts to write the element indexed by `tag` into `dst`
+// GetElement  writes the element indexed by `tag` into `dst`
 // its return value indicates whether the DataSet contains said `tag`.
 func (ds *DataSet) GetElement(tag uint32, dst *Element) bool {
 	if e, found := (*ds)[tag]; found {
@@ -98,8 +98,19 @@ func (ds *DataSet) GetElement(tag uint32, dst *Element) bool {
 	return false
 }
 
-// AddElement adds Element `e` to the data set.
-func (ds *DataSet) AddElement(e Element) {
+// GetElementValue writes the element's value indexed by `tag` into `dst`
+// its return value (bool) indicates whether the DataSet contains said `tag`.
+// its return value (error) indicates whether there are any other problems.
+func (ds *DataSet) GetElementValue(tag uint32, dst interface{}) (bool, error) {
+	if e, found := (*ds)[tag]; found {
+		return true, e.GetValue(dst)
+	}
+
+	return false, nil
+}
+
+// addElement adds Element `e` to the data set.
+func (ds *DataSet) addElement(e Element) {
 	(*ds)[e.GetTag()] = e
 }
 
@@ -146,33 +157,6 @@ func (ds *DataSet) GetCharacterSet() (cs *CharacterSet) {
 	return
 }
 
-// GetElements returns all elements in the data set as a flat slice.
-//
-// Note: this is quite an expensive operation and may incur many allocations
-func (ds *DataSet) GetElements() []Element {
-	// initialise a variable-length array of elements
-	elements := []Element{}
-	// for each element in the map, add it to the newly-created array
-	for _, e := range *ds {
-		elements = append(elements, e)
-	}
-	// and return said array to the callee
-	return elements
-}
-
-// EachElement calls `fn` on each element within the dataset
-func (ds *DataSet) EachElement(onElement func(e *Element)) {
-	for _, e := range *ds {
-		onElement(&e)
-		(*ds)[e.GetTag()] = e
-	}
-}
-
-// NewDataSet returns a fresh DataSet
-func NewDataSet() DataSet {
-	return make(DataSet, 0)
-}
-
 /*
 ===============================================================================
     Item
@@ -189,7 +173,7 @@ type Item struct {
 // NewItem returns a fresh Item with a blank data set.
 func NewItem() Item {
 	return Item{
-		dataset: NewDataSet(),
+		dataset: make(DataSet, 0),
 	}
 }
 
@@ -606,7 +590,7 @@ func (elr *ElementReader) readItemUndefLength(readEmbeddedElements bool, dst *It
 				return elr.err
 			}
 			// add element to item.dataset
-			dst.dataset.AddElement(e)
+			dst.dataset.addElement(e)
 			continue
 		}
 		// we are not reading embedded elemebts, instead extend "fragment" by four bytes
@@ -677,7 +661,7 @@ func (elr *ElementReader) readItem(readEmbeddedElements bool, dst *Item) error {
 				return elr.err
 			}
 			// 	add element to "dest".dataset
-			dst.dataset.AddElement(e)
+			dst.dataset.addElement(e)
 			// 	continue
 		}
 		return nil

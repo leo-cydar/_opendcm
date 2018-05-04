@@ -18,8 +18,8 @@ import (
 // Dicom represents a file containing one SOP Instance
 // as per http://dicom.nema.org/dicom/2013/output/chtml/part10/chapter_7.html
 type Dicom struct {
-	dataset  DataSet
 	preamble [128]byte
+	DataSet
 	tmpBuffers
 }
 
@@ -28,16 +28,11 @@ func (dcm *Dicom) GetPreamble() [128]byte {
 	return dcm.preamble
 }
 
-// GetDataSet returns the parsed DataSet (elements)
-func (dcm *Dicom) GetDataSet() *DataSet {
-	return &dcm.dataset
-}
-
 // NewDicom returns a fresh Dicom suitable for parsing
 // dicom data.
-func NewDicom() Dicom {
+func newDicom() Dicom {
 	dcm := Dicom{}
-	dcm.dataset = NewDataSet()
+	dcm.DataSet = make(DataSet, 0)
 	return dcm
 }
 
@@ -85,13 +80,14 @@ func (dcm *Dicom) attemptReadPreamble(br *bin.Reader) (bool, error) {
 // FromReader decodes a dicom file from `source`, returning an error
 // if something went wrong during the process.
 // This takes ownership of `source`; do not use it after passing through.
-func (dcm *Dicom) FromReader(source io.Reader) error {
+func FromReader(source io.Reader) (Dicom, error) {
+	dcm := newDicom()
 	binaryReader := bin.NewReader(source, binary.LittleEndian)
 
 	// attempt to parse preamble
 	dcm._bool, dcm.err = dcm.attemptReadPreamble(&binaryReader)
 	if dcm.err != nil {
-		return dcm.err
+		return dcm, dcm.err
 	}
 	if !dcm._bool {
 		Debug("file is missing preamble/magic (bytes 0-132)")
@@ -116,7 +112,7 @@ func (dcm *Dicom) FromReader(source io.Reader) error {
 				if dcm.err == io.EOF {
 					break
 				}
-				return dcm.err
+				return dcm, dcm.err
 			}
 			// if the first component is not (0002), we have reached end
 			// of meta section
@@ -129,7 +125,7 @@ func (dcm *Dicom) FromReader(source io.Reader) error {
 					if dcm.err == io.EOF {
 						break
 					}
-					return dcm.err
+					return dcm, dcm.err
 				}
 				elr.determineEncoding(dcm._1kb[:6])
 			}
@@ -138,11 +134,11 @@ func (dcm *Dicom) FromReader(source io.Reader) error {
 			if dcm.err == io.EOF {
 				break
 			}
-			return dcm.err
+			return dcm, dcm.err
 		}
 		//Debugf("Adding element: %s [%s] @ %d", e.dictEntry, e.GetVR(), elr.br.GetPosition())
 		if e.GetTag() == 0x00080005 {
-			dcm.GetDataSet().AddElement(e)
+			dcm.addElement(e)
 		} else {
 			elements = append(elements, e)
 		}
@@ -150,7 +146,7 @@ func (dcm *Dicom) FromReader(source io.Reader) error {
 
 	// we must re-encode the parsed elements from their native characterset into UTF-8:
 	// lookup character set according to the pre-defined table
-	cs := dcm.GetDataSet().GetCharacterSet()
+	cs := dcm.GetCharacterSet()
 	Debugf("CS: %v", cs.Name)
 	decoder := cs.Encoding.NewDecoder()
 	// for each element in dataset:
@@ -161,21 +157,19 @@ func (dcm *Dicom) FromReader(source io.Reader) error {
 			// if so, decode data in-place
 			e.data, _ = decoder.Bytes(e.data) // this will not result in an error as replacement runes are enforced
 		}
-		dcm.GetDataSet().AddElement(e)
+		dcm.addElement(e)
 	}
-	return nil
+	return dcm, nil
 }
 
 // FromFile decodes a dicom file from the given file path
 // See: FromReader for more information
-func (dcm *Dicom) FromFile(path string) error {
+func FromFile(path string) (Dicom, error) {
 	var f *os.File
+	dcm := newDicom()
 	if f, dcm.err = os.Open(path); dcm.err != nil {
-		return dcm.err
+		return dcm, dcm.err
 	}
 	defer f.Close()
-	if dcm.err = dcm.FromReader(f); dcm.err != nil {
-		return dcm.err
-	}
-	return nil
+	return FromReader(f)
 }

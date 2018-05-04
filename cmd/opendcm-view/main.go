@@ -29,7 +29,6 @@ func usage() {
 }
 
 func main() {
-	od.GetConfig()
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
 		usage()
 	}
@@ -39,32 +38,20 @@ func main() {
 	stat, err := os.Stat(os.Args[1])
 	check(err)
 	if isDir := stat.IsDir(); !isDir {
-		dcm := od.NewDicom()
-		err := dcm.FromFile(os.Args[1])
+		dcm, err := od.FromFile(os.Args[1])
 		check(err)
-		// var elements []od.Element
-		// for _, v := range dcm.Elements {
-		// 	elements = append(elements, v)
-		// }
-		// sort.Sort(od.ByTag(elements))
-		for _, element := range *dcm.GetDataSet() {
-			// description := element.Describe(0)
-			// for _, line := range description {
-			// 	fmt.Println(line)
-			// }
+		for _, element := range dcm.DataSet {
 			fmt.Printf("%08x = %v\n", element.GetTag(), element.GetName())
 		}
-		name := ""
-		var e = od.NewElement()
-		dcm.GetDataSet().GetElement(0x00100010, &e)
-		e.GetValue(&name)
-		fmt.Printf("PatientName = %s\n", name)
+		var name string
+		if found, err := dcm.GetElementValue(0x00100010, &name); found && err == nil {
+			fmt.Printf("PatientName = %s\n", name)
+		}
 	} else {
 		errorCount := 0
 		successCount := 0
 		err := od.ConcurrentlyWalkDir(os.Args[1], func(path string) {
-			dcm := od.NewDicom()
-			err := dcm.FromFile(path)
+			_, err := od.FromFile(path)
 			check(err)
 			basePath := filepath.Base(path)
 			if err != nil {

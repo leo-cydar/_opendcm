@@ -117,17 +117,16 @@ func TestBoolFromEnvDefault(t *testing.T) {
 	assert.False(t, val)
 }
 
-func TestGetConfig(t *testing.T) {
+func TestInitialiseConfig(t *testing.T) {
 	os.Setenv("OPENDCM_OPENFILELIMIT", "100")
 	config._set = false
-	cfg := GetConfig()
-	assert.Equal(t, 100, cfg.OpenFileLimit)
+	initialiseConfig()
+	assert.Equal(t, 100, config.OpenFileLimit)
 }
 func TestOverrideConfig(t *testing.T) {
 	newcfg := Config{OpenFileLimit: 256}
 	OverrideConfig(newcfg)
-	cfg := GetConfig()
-	assert.Equal(t, 256, cfg.OpenFileLimit)
+	assert.Equal(t, 256, config.OpenFileLimit)
 }
 
 func TestConcurrentlyWalkDir(t *testing.T) {
