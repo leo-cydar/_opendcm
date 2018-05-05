@@ -137,9 +137,10 @@ func FromReader(source io.Reader) (Dicom, error) {
 			return dcm, dcm.err
 		}
 		//Debugf("Adding element: %s [%s] @ %d", e.dictEntry, e.GetVR(), elr.br.GetPosition())
-		if e.GetTag() == 0x00080005 {
+		switch e.GetTag() {
+		case 0x00080005:
 			dcm.addElement(e)
-		} else {
+		default:
 			elements = append(elements, e)
 		}
 	}

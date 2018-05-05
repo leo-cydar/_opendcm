@@ -124,20 +124,6 @@ func (ds *DataSet) Len() int {
 	return len((*ds))
 }
 
-// GetImplementationVersionName is an experimental method to debug
-// retrieval of elements from the DataSet. Will likely be removed.
-func (ds *DataSet) GetImplementationVersionName(dst *string) bool {
-	// initialise a new element to hold version name data
-	e := NewElement()
-	// check whether the element exists in the dataset map
-	if found := ds.GetElement(0x00020013, &e); !found {
-		return false
-	}
-	// if it exists, write the data directly into destination
-	*dst = string(e.GetDataBytes())
-	return true
-}
-
 // GetCharacterSet returns either the character set as defined in (0008,0005),
 // or ISO_IR 100 (default character set)
 func (ds *DataSet) GetCharacterSet() (cs *CharacterSet) {
@@ -175,18 +161,6 @@ func NewItem() Item {
 	return Item{
 		dataset: make(DataSet, 0),
 	}
-}
-
-// GetFragment returns the "fragment" data within an Item.
-//
-// An item will have fragment data if, when reading the source data,
-// "shouldParseEmbeddedElements" returned false.
-//
-// The Dicom spec could be clearer of _when_ items will have
-// fragments, rather than elements.
-// As far as I can see, the only case in practice will be with the PixelData tag.
-func (i *Item) GetFragment() []byte {
-	return i.fragment
 }
 
 /*
@@ -250,6 +224,11 @@ func (e *Element) GetItems() []Item {
 	return e.items
 }
 
+// Len returns the data literal bytelength
+func (e *Element) Len() int {
+	return int(e.datalen)
+}
+
 func (e *Element) supportsType(typ interface{}) bool {
 	/*
 			TODO:
@@ -310,16 +289,16 @@ func (e *Element) GetValue(dst interface{}) error {
 	case *string:
 		// if VR is textual just return UTF8 string (when a dicom is parsed, using `FromReader`, all text elements
 		// are re-encoded into UTF-8 as before the function returns.)
-		Debugf("String: %s", e.GetDataBytes())
-		*typedDst = string(e.GetDataBytes())
+		Debugf("String: %s", e.data)
+		*typedDst = string(e.data)
 	case *[]string:
-		for _, v := range splitCharacterStringVM(e.GetDataBytes()) {
+		for _, v := range splitCharacterStringVM(e.data) {
 			*typedDst = append(*typedDst, string(v))
 		}
 	case *[]byte:
-		*typedDst = e.GetDataBytes()
+		*typedDst = e.data
 	case *[]float32:
-		for _, v := range splitBinaryVM(e.GetDataBytes(), 4) {
+		for _, v := range splitBinaryVM(e.data, 4) {
 			if e.isLittleEndian {
 				*typedDst = append(*typedDst, math.Float32frombits(binary.LittleEndian.Uint32(v)))
 			} else {
@@ -327,9 +306,9 @@ func (e *Element) GetValue(dst interface{}) error {
 			}
 		}
 	case *float32:
-		*typedDst = math.Float32frombits(binary.LittleEndian.Uint32(e.GetDataBytes()[:4]))
+		*typedDst = math.Float32frombits(binary.LittleEndian.Uint32(e.data[:4]))
 	case *[]float64:
-		for _, v := range splitBinaryVM(e.GetDataBytes(), 8) {
+		for _, v := range splitBinaryVM(e.data, 8) {
 			if e.isLittleEndian {
 				*typedDst = append(*typedDst, math.Float64frombits(binary.LittleEndian.Uint64(v)))
 			} else {
@@ -337,9 +316,9 @@ func (e *Element) GetValue(dst interface{}) error {
 			}
 		}
 	case *float64:
-		*typedDst = math.Float64frombits(binary.LittleEndian.Uint64(e.GetDataBytes()[:8]))
+		*typedDst = math.Float64frombits(binary.LittleEndian.Uint64(e.data[:8]))
 	case *[]int16:
-		for _, v := range splitBinaryVM(e.GetDataBytes(), 2) {
+		for _, v := range splitBinaryVM(e.data, 2) {
 			if e.isLittleEndian {
 				*typedDst = append(*typedDst, int16(binary.LittleEndian.Uint16(v)))
 			} else {
@@ -348,12 +327,12 @@ func (e *Element) GetValue(dst interface{}) error {
 		}
 	case *int16:
 		if e.isLittleEndian {
-			*typedDst = int16(binary.LittleEndian.Uint16(e.GetDataBytes()))
+			*typedDst = int16(binary.LittleEndian.Uint16(e.data))
 		} else {
-			*typedDst = int16(binary.BigEndian.Uint16(e.GetDataBytes()))
+			*typedDst = int16(binary.BigEndian.Uint16(e.data))
 		}
 	case *[]int32:
-		for _, v := range splitBinaryVM(e.GetDataBytes(), 4) {
+		for _, v := range splitBinaryVM(e.data, 4) {
 			if e.isLittleEndian {
 				*typedDst = append(*typedDst, int32(binary.LittleEndian.Uint32(v)))
 			} else {
@@ -362,9 +341,9 @@ func (e *Element) GetValue(dst interface{}) error {
 		}
 	case *int32:
 		if e.isLittleEndian {
-			*typedDst = int32(binary.LittleEndian.Uint32(e.GetDataBytes()))
+			*typedDst = int32(binary.LittleEndian.Uint32(e.data))
 		} else {
-			*typedDst = int32(binary.BigEndian.Uint32(e.GetDataBytes()))
+			*typedDst = int32(binary.BigEndian.Uint32(e.data))
 		}
 	// if not writable type (pointer), return error
 	case bool, string,
@@ -376,11 +355,6 @@ func (e *Element) GetValue(dst interface{}) error {
 		return fmt.Errorf(`writing to type "%v" is not yet implemented`, reflect.TypeOf(dst))
 	}
 	return nil
-}
-
-// GetDataBytes will likely be removed / modified.
-func (e *Element) GetDataBytes() []byte {
-	return e.data
 }
 
 // NewElement returns a fresh Element
