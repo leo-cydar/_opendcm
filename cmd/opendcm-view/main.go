@@ -43,10 +43,22 @@ func main() {
 		for _, element := range dcm.DataSet {
 			fmt.Printf("%08x = %v\n", element.GetTag(), element.GetName())
 		}
-		var name string
-		if found, err := dcm.GetElementValue(0x00100010, &name); found && err == nil {
-			fmt.Printf("PatientName = %s\n", name)
+		pd := dcm.GetPixelData()
+		fmt.Printf("NUM PIXEL FRAMES: %d\n", pd.NumFrames())
+		for i := 0; i < pd.NumFrames(); i++ {
+			fmt.Printf("Frame: (len %d)\n", len(pd.GetFrame(i)))
+			f, err := os.Create(fmt.Sprintf("frame-%d.jpg", i))
+			check(err)
+			f.Write(pd.GetFrame(i)[:len(pd.GetFrame(i))-1])
+			f.Close()
 		}
+		tsuid := ""
+		found, err := dcm.GetElementValue(0x00020010, &tsuid)
+		check(err)
+		if !found {
+			panic("not found")
+		}
+		fmt.Printf("TS = %s\n", tsuid)
 	} else {
 		errorCount := 0
 		successCount := 0
